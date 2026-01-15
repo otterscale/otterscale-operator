@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: otterscale-operator
 repo: github.com/otterscale/otterscale-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: otterscale.io
+  group: core
+  kind: Workspace
+  path: github.com/otterscale/otterscale-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
