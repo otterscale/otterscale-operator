@@ -11,17 +11,18 @@ metadata:
   labels:
     app.kubernetes.io/name: otterscale-operator
     app.kubernetes.io/managed-by: kustomize
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
   name: workspace-admin-role
 rules:
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces
-  verbs:
-  - '*'
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces/status
-  verbs:
-  - get
+  - apiGroups:
+      - core.otterscale.io
+    resources:
+      - workspaces
+    verbs:
+      - "*"
+  - apiGroups:
+      - core.otterscale.io
+    resources:
+      - workspaces/status
+    verbs:
+      - get

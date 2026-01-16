@@ -1,8 +1,8 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: workspace-admin-binding
+  name: workspace-protection-binding
 spec:
-  policyName: workspace-admin-protection
+  policyName: workspace-protection
   validationActions: [Deny]
   matchResources: {}

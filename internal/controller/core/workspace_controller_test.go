@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
@@ -127,9 +126,6 @@ var _ = Describe("Workspace Controller", func() {
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
-
-			grantAccess(ctx, k8sClient, adminUser, []string{"workspaces"}, []string{"delete", "update"})
-			grantAccess(ctx, k8sClient, viewUser, []string{"workspaces"}, []string{"delete", "update"})
 		})
 
 		createClientForUser := func(username string) client.Client {
@@ -198,36 +194,3 @@ var _ = Describe("Workspace Controller", func() {
 		})
 	})
 })
-
-func grantAccess(ctx context.Context, c client.Client, user string, resources, verbs []string) {
-	roleName := "test-access-" + user
-
-	role := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: roleName,
-		},
-		Rules: []rbacv1.PolicyRule{{
-			APIGroups: []string{"core.otterscale.io"},
-			Resources: resources,
-			Verbs:     verbs,
-		}},
-	}
-	_ = c.Create(ctx, role)
-
-	binding := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: roleName + "-binding",
-		},
-		Subjects: []rbacv1.Subject{{
-			Kind:     "User",
-			Name:     user,
-			APIGroup: "rbac.authorization.k8s.io",
-		}},
-		RoleRef: rbacv1.RoleRef{
-			Kind:     "ClusterRole",
-			Name:     roleName,
-			APIGroup: "rbac.authorization.k8s.io",
-		},
-	}
-	_ = c.Create(ctx, binding)
-}

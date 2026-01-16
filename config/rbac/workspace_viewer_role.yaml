@@ -11,19 +11,20 @@ metadata:
   labels:
     app.kubernetes.io/name: otterscale-operator
     app.kubernetes.io/managed-by: kustomize
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
   name: workspace-viewer-role
 rules:
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces/status
-  verbs:
-  - get
+  - apiGroups:
+      - core.otterscale.io
+    resources:
+      - workspaces
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - core.otterscale.io
+    resources:
+      - workspaces/status
+    verbs:
+      - get

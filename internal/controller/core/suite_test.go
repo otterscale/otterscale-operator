@@ -90,8 +90,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	policyPath := filepath.Join("..", "..", "..", "config", "admission")
-	applyManifests(policyPath)
+	applyManifests(filepath.Join("..", "..", "..", "config", "admission"))
+	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "workspace_editor_role.yaml"))
+	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "workspace_system_authenticated_binding.yaml"))
 })
 
 var _ = AfterSuite(func() {
@@ -132,24 +133,26 @@ func applyManifests(dir string) {
 		if filepath.Ext(f.Name()) != ".yaml" || f.Name() == "kustomization.yaml" {
 			continue
 		}
-
-		path := filepath.Join(dir, f.Name())
-		file, err := os.Open(path)
-		Expect(err).NotTo(HaveOccurred())
-
-		decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
-		for {
-			obj := &unstructured.Unstructured{}
-			if err := decoder.Decode(&obj.Object); err != nil {
-				if err.Error() == "EOF" {
-					break
-				}
-				Expect(err).NotTo(HaveOccurred())
-			}
-			if err := k8sClient.Create(ctx, obj); err != nil {
-				Expect(err).NotTo(HaveOccurred())
-			}
-		}
-		_ = file.Close()
+		applyManifest(filepath.Join(dir, f.Name()))
 	}
+}
+
+func applyManifest(path string) {
+	file, err := os.Open(path)
+	Expect(err).NotTo(HaveOccurred())
+
+	decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
+	for {
+		obj := &unstructured.Unstructured{}
+		if err := decoder.Decode(&obj.Object); err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			Expect(err).NotTo(HaveOccurred())
+		}
+		if err := k8sClient.Create(ctx, obj); err != nil {
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
+	Expect(file.Close()).To(Succeed())
 }
