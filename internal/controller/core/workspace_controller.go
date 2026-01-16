@@ -205,7 +205,7 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, w *v1al
 // reconcileRoleBinding manages the binding between a Role and a list of Users.
 // It deletes the binding if there are no users for that role.
 func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *v1alpha1.Workspace, ur v1alpha1.WorkspaceUserRole, users []v1alpha1.WorkspaceUser) error {
-	name := fmt.Sprintf("%s-binding-%s", w.Name, string(ur))
+	name := w.Name + "-binding-" + string(ur)
 	binding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
