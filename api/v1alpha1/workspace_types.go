@@ -21,23 +21,38 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// WorkspaceOwner defines the owner of a workspace.
-type WorkspaceOwner struct {
-	// Subject is the unique identifier of the owner.
+// WorkspaceUser defines the user of a workspace.
+type WorkspaceUser struct {
+	// Subject is the unique identifier of the user (e.g. oidc subject).
 	// +kubebuilder:validation:MinLength=1
 	// +required
-	Subject string `json:"subject,omitempty"`
+	Subject string `json:"subject"`
 
-	// Name is the display name of the owner.
+	// Name is the display name of the user.
 	// +optional
 	Name *string `json:"name,omitempty"`
 }
 
 // WorkspaceSpec defines the desired state of Workspace
 type WorkspaceSpec struct {
-	// Owner is the owner of the workspace.
+	// Admins are the admins of the workspace.
+	// +listType=map
+	// +listMapKey=subject
+	// +kubebuilder:validation:MinItems=1
 	// +required
-	Owner WorkspaceOwner `json:"owner,omitzero"`
+	Admins []WorkspaceUser `json:"admins,omitempty"`
+
+	// Editors are the editors of the workspace.
+	// +listType=map
+	// +listMapKey=subject
+	// +optional
+	Editors []WorkspaceUser `json:"editors,omitempty"`
+
+	// Viewers are the viewers of the workspace.
+	// +listType=map
+	// +listMapKey=subject
+	// +optional
+	Viewers []WorkspaceUser `json:"viewers,omitempty"`
 
 	// ResourceQuota defines the resource quota for the workspace.
 	// +optional
@@ -47,7 +62,7 @@ type WorkspaceSpec struct {
 	// +optional
 	LimitRange *corev1.LimitRangeSpec `json:"limitRange,omitempty"`
 
-	// NetworkIsolationEnabled indicates whether network isolation is enabled for the workspace.
+	// NetworkIsolationEnabled indicates whether network isolation is enabled.
 	// +optional
 	NetworkIsolationEnabled *bool `json:"networkIsolationEnabled,omitempty"`
 }
@@ -66,15 +81,13 @@ type WorkspaceStatus struct {
 	// +optional
 	LimitRange *corev1.ObjectReference `json:"limitRange,omitempty"`
 
-	// conditions represent the current state of the Workspace resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// RoleBindings are the role bindings associated with the workspace.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	RoleBindings []corev1.ObjectReference `json:"roleBindings,omitempty"`
+
+	// Conditions represent the current state of the Workspace resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -83,6 +96,8 @@ type WorkspaceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace.name`
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Workspace is the Schema for the workspaces API
 type Workspace struct {
