@@ -51,7 +51,7 @@ func (p *IstioPoller) Start(ctx context.Context) error {
 			}
 			if enabled {
 				logger.Info("Istio detected via polling! Restarting operator...")
-				return errors.New("Istio detected, restarting operator")
+				return errors.New("istio detected, restarting operator")
 			}
 		}
 	}
