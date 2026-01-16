@@ -18,7 +18,7 @@ package controller
 
 import (
 	"context"
-	"os"
+	"errors"
 	"time"
 
 	"k8s.io/client-go/rest"
@@ -51,7 +51,7 @@ func (p *IstioPoller) Start(ctx context.Context) error {
 			}
 			if enabled {
 				logger.Info("Istio detected via polling! Restarting operator...")
-				os.Exit(1)
+				return errors.New("Istio detected, restarting operator")
 			}
 		}
 	}
