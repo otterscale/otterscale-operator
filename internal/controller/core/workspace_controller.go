@@ -465,38 +465,19 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	}
 
 	// Update RoleBindings references
-	activeBindings := []corev1.ObjectReference{}
-	appendBinding := func(ur v1alpha1.WorkspaceUserRole) {
-		activeBindings = append(activeBindings, corev1.ObjectReference{
+	rolesInUse := map[v1alpha1.WorkspaceUserRole]bool{}
+	for _, u := range w.Spec.Users {
+		rolesInUse[u.Role] = true
+	}
+
+	newStatus.RoleBindings = []corev1.ObjectReference{}
+	for role := range rolesInUse {
+		newStatus.RoleBindings = append(newStatus.RoleBindings, corev1.ObjectReference{
 			APIVersion: rbacv1.SchemeGroupVersion.String(),
 			Kind:       "RoleBinding",
-			Name:       w.Name + "-binding-" + string(ur),
+			Name:       w.Name + "-binding-" + string(role),
 			Namespace:  w.Name,
 		})
-	}
-
-	hasAdmin, hasEdit, hasView := false, false, false
-	for _, u := range w.Spec.Users {
-		switch u.Role {
-		case v1alpha1.WorkspaceUserRoleAdmin:
-			hasAdmin = true
-
-		case v1alpha1.WorkspaceUserRoleEdit:
-			hasEdit = true
-
-		case v1alpha1.WorkspaceUserRoleView:
-			hasView = true
-		}
-	}
-
-	if hasAdmin {
-		appendBinding(v1alpha1.WorkspaceUserRoleAdmin)
-	}
-	if hasEdit {
-		appendBinding(v1alpha1.WorkspaceUserRoleEdit)
-	}
-	if hasView {
-		appendBinding(v1alpha1.WorkspaceUserRoleView)
 	}
 
 	// Update ResourceQuota reference
