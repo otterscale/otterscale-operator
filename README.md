@@ -1,18 +1,34 @@
-# otterscale-operator
+[![GitHub Release](https://img.shields.io/github/v/release/otterscale/otterscale-operator?logo=github)](https://github.com/otterscale/otterscale-operator/releases)
+[![GitHub Pre-Release](https://img.shields.io/github/v/release/otterscale/otterscale-operator?logo=github&include_prereleases&label=pre-release)](https://github.com/otterscale/otterscale-operator/releases)
+[![GitHub License](https://img.shields.io/github/license/otterscale/otterscale-operator?logo=github)](https://opensource.org/license/apache-2-0)
+[![Lint Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/lint.yml?logo=github&label=lint)](https://github.com/otterscale/otterscale-operator/actions/workflows/lint.yml)
+[![Test Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/test.yml?logo=github&label=test)](https://github.com/otterscale/otterscale-operator/actions/workflows/test.yml)
+[![Test E2E Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/test-e2e.yml?logo=github&label=test%20e2e)](https://github.com/otterscale/otterscale-operator/actions/workflows/test-e2e.yml)
+[![Codecov](https://codecov.io/gh/otterscale/otterscale-operator/graph/badge.svg?token=2wcwTTorFq)](https://codecov.io/gh/otterscale/otterscale-operator)
+
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11794/badge)](https://www.bestpractices.dev/projects/11794)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/otterscale/otterscale-operator/badge)](https://scorecard.dev/viewer/?uri=github.com/otterscale/otterscale-operator)
+[![Go Report Card](https://goreportcard.com/badge/github.com/otterscale/otterscale-operator)](https://goreportcard.com/report/github.com/otterscale/otterscale-operator)
+
+# Otterscale Operator
+
 // TODO(user): Add simple overview of use/purpose
 
 ## Description
+
 // TODO(user): An in-depth paragraph about your project and overview of use
 
 ## Getting Started
 
 ### Prerequisites
+
 - go version v1.24.6+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
 
 ### To Deploy on the cluster
+
 **Build and push your image to the location specified by `IMG`:**
 
 ```sh
@@ -36,7 +52,7 @@ make deploy IMG=<some-registry>/otterscale-operator:tag
 ```
 
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+> privileges or be logged in as admin.
 
 **Create instances of your solution**
 You can apply the samples (examples) from the config/sample:
@@ -45,9 +61,10 @@ You can apply the samples (examples) from the config/sample:
 kubectl apply -k config/samples/
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+> **NOTE**: Ensure that the samples has default values to test it out.
 
 ### To Uninstall
+
 **Delete the instances (CRs) from the cluster:**
 
 ```sh
@@ -101,7 +118,7 @@ kubebuilder edit --plugins=helm/v2-alpha
 ```
 
 2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
+   can obtain this solution from there.
 
 **NOTE:** If you change the project, you need to update the Helm Chart
 using the same command above to sync the latest changes. Furthermore,
@@ -111,6 +128,7 @@ previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml
 is manually re-applied afterwards.
 
 ## Contributing
+
 // TODO(user): Add detailed information on how you would like others to contribute to this project
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
@@ -132,4 +150,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
