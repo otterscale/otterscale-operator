@@ -35,12 +35,13 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	corev1alpha1 "github.com/otterscale/otterscale-operator/api/v1alpha1"
-	"github.com/otterscale/otterscale-operator/internal/controller"
+	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
+	corecontroller "github.com/otterscale/otterscale-operator/internal/controller/core"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
+	version  = "devel"
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
@@ -178,9 +179,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.WorkspaceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+	if err := (&corecontroller.WorkspaceReconciler{
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Version: version,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)
