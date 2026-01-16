@@ -72,6 +72,7 @@ var _ = Describe("Workspace Controller", func() {
 			By("Cleanup the specific resource instance Workspace")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
+
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &WorkspaceReconciler{
@@ -126,6 +127,19 @@ var _ = Describe("Workspace Controller", func() {
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
+		})
+
+		AfterEach(func() {
+			resource := &corev1alpha1.Workspace{}
+			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			if err != nil {
+				// If the resource is not found, it's already cleaned up.
+				Expect(errors.IsNotFound(err)).To(BeTrue())
+				return
+			}
+
+			By("Cleanup the specific resource instance Workspace")
+			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 
 		createClientForUser := func(username string) client.Client {

@@ -140,6 +140,9 @@ func applyManifests(dir string) {
 func applyManifest(path string) {
 	file, err := os.Open(path)
 	Expect(err).NotTo(HaveOccurred())
+	defer func() {
+		Expect(file.Close()).To(Succeed())
+	}()
 
 	decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
 	for {
@@ -150,9 +153,13 @@ func applyManifest(path string) {
 			}
 			Expect(err).NotTo(HaveOccurred())
 		}
+
+		if obj.Object == nil {
+			continue
+		}
+
 		if err := k8sClient.Create(ctx, obj); err != nil {
 			Expect(err).NotTo(HaveOccurred())
 		}
 	}
-	Expect(file.Close()).To(Succeed())
 }
