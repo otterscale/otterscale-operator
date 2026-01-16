@@ -11,23 +11,24 @@ metadata:
   labels:
     app.kubernetes.io/name: otterscale-operator
     app.kubernetes.io/managed-by: kustomize
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
   name: workspace-editor-role
 rules:
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces/status
-  verbs:
-  - get
+  - apiGroups:
+      - core.otterscale.io
+    resources:
+      - workspaces
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - core.otterscale.io
+    resources:
+      - workspaces/status
+    verbs:
+      - get

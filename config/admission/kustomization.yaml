@@ -1,0 +1,3 @@
+resources:
+  - workspace_protection_binding.yaml
+  - workspace_protection.yaml
