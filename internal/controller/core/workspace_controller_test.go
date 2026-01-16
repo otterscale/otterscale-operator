@@ -37,8 +37,7 @@ var _ = Describe("Workspace Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Name: resourceName,
 		}
 		workspace := &corev1alpha1.Workspace{}
 
@@ -48,10 +47,14 @@ var _ = Describe("Workspace Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &corev1alpha1.Workspace{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: resourceName,
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: corev1alpha1.WorkspaceSpec{
+						Users: []corev1alpha1.WorkspaceUser{{
+							Role:    corev1alpha1.WorkspaceUserRoleAdmin,
+							Subject: "subject-1",
+						}},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

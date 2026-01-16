@@ -12,7 +12,7 @@ spec:
     listKind: WorkspaceList
     plural: workspaces
     singular: workspace
-  scope: Namespaced
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.namespace.name
@@ -24,7 +24,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Workspace is the Schema for the workspaces API
+        description: |-
+          Workspace is the Schema for the workspaces API.
+          A Workspace represents a logical isolation unit (Namespace) with associated policies, quotas, and user access.
         properties:
           apiVersion:
             description: |-
@@ -44,51 +46,11 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of Workspace
+            description: Spec defines the desired behavior of the Workspace.
             properties:
-              admins:
-                description: Admins are the admins of the workspace.
-                items:
-                  description: WorkspaceUser defines the user of a workspace.
-                  properties:
-                    name:
-                      description: Name is the display name of the user.
-                      type: string
-                    subject:
-                      description: Subject is the unique identifier of the user (e.g.
-                        oidc subject).
-                      minLength: 1
-                      type: string
-                  required:
-                  - subject
-                  type: object
-                minItems: 1
-                type: array
-                x-kubernetes-list-map-keys:
-                - subject
-                x-kubernetes-list-type: map
-              editors:
-                description: Editors are the editors of the workspace.
-                items:
-                  description: WorkspaceUser defines the user of a workspace.
-                  properties:
-                    name:
-                      description: Name is the display name of the user.
-                      type: string
-                    subject:
-                      description: Subject is the unique identifier of the user (e.g.
-                        oidc subject).
-                      minLength: 1
-                      type: string
-                  required:
-                  - subject
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - subject
-                x-kubernetes-list-type: map
               limitRange:
-                description: LimitRange defines the limit range for the workspace.
+                description: LimitRange describes the default resource limits and
+                  requests for pods in the workspace.
                 properties:
                   limits:
                     description: Limits is the list of LimitRangeItem objects that
@@ -162,12 +124,28 @@ spec:
                 required:
                 - limits
                 type: object
-              networkIsolationEnabled:
-                description: NetworkIsolationEnabled indicates whether network isolation
-                  is enabled.
-                type: boolean
+              networkIsolation:
+                description: NetworkIsolation defines the ingress traffic rules for
+                  the workspace.
+                properties:
+                  allowedNamespaces:
+                    description: |-
+                      AllowedNamespaces specifies a list of external namespaces permitted to access this workspace
+                      when isolation is enabled. Essential system namespaces (e.g., 'istio-system', 'monitoring')
+                      should be included here if required.
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  enabled:
+                    description: |-
+                      Enabled toggles the enforcement of network isolation.
+                      If true, default deny-all ingress rules are applied except for allowed namespaces.
+                    type: boolean
+                type: object
               resourceQuota:
-                description: ResourceQuota defines the resource quota for the workspace.
+                description: ResourceQuota describes the compute resource constraints
+                  (CPU, Memory, etc.) applied to the underlying namespace.
                 properties:
                   hard:
                     additionalProperties:
@@ -232,35 +210,48 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
-              viewers:
-                description: Viewers are the viewers of the workspace.
+              users:
+                description: Users is the list of users granted access to this workspace.
                 items:
-                  description: WorkspaceUser defines the user of a workspace.
+                  description: WorkspaceUser defines a single user entity associated
+                    with a workspace.
                   properties:
                     name:
-                      description: Name is the display name of the user.
+                      description: Name is the human-readable display name of the
+                        user.
+                      type: string
+                    role:
+                      description: Role defines the authorization level (Admin, Edit,
+                        View).
+                      enum:
+                      - admin
+                      - edit
+                      - view
                       type: string
                     subject:
-                      description: Subject is the unique identifier of the user (e.g.
-                        oidc subject).
+                      description: |-
+                        Subject is the unique identifier of the user (e.g., OIDC subject, email, or username).
+                        This identifier maps directly to the Kubernetes RBAC Subject.
                       minLength: 1
                       type: string
                   required:
+                  - role
                   - subject
                   type: object
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - subject
                 x-kubernetes-list-type: map
             required:
-            - admins
+            - users
             type: object
           status:
-            description: status defines the observed state of Workspace
+            description: Status represents the current information about the Workspace.
             properties:
               conditions:
-                description: Conditions represent the current state of the Workspace
-                  resource.
+                description: Conditions store the status conditions of the Workspace
+                  (e.g., Ready, Failed).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -320,8 +311,8 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               limitRange:
-                description: LimitRange is the limit range object associated with
-                  the workspace.
+                description: LimitRange is a reference to the corev1.LimitRange managed
+                  by this Workspace.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -364,7 +355,8 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               namespace:
-                description: Namespace is the namespace associated with the workspace.
+                description: Namespace is a reference to the corev1.Namespace managed
+                  by this Workspace.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -407,8 +399,8 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               resourceQuota:
-                description: ResourceQuota is the resource quota object associated
-                  with the workspace.
+                description: ResourceQuota is a reference to the corev1.ResourceQuota
+                  managed by this Workspace.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -451,8 +443,8 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               roleBindings:
-                description: RoleBindings are the role bindings associated with the
-                  workspace.
+                description: RoleBindings contains references to all RBAC RoleBindings
+                  created for the workspace users.
                 items:
                   description: ObjectReference contains enough information to let
                     you inspect or modify the referred object.
@@ -498,9 +490,7 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
+                x-kubernetes-list-type: atomic
             type: object
         required:
         - spec

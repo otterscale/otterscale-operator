@@ -1,3 +1,6 @@
+# Version is set from the latest git tag or commit hash
+VERSION=$(shell git describe --tags --always)
+
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 
@@ -106,7 +109,7 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -ldflags "-w -s -X main.version=$(VERSION)" -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
