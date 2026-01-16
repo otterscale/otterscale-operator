@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	corev1alpha1 "github.com/otterscale/otterscale-operator/api/v1alpha1"
+	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
 )
 
 // WorkspaceReconciler reconciles a Workspace object
