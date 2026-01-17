@@ -87,7 +87,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if updated {
 		logger.Info("Workspace labels updated for user indexing, requeuing")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{}, nil
 	}
 
 	// 1. Reconcile Namespace (The foundation of the workspace)

@@ -76,6 +76,11 @@ var _ = Describe("Workspace Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	}
 
+	fullyReconcile := func() {
+		executeReconcile() // First reconcile updates labels
+		executeReconcile() // Second reconcile provisions resources
+	}
+
 	fetchResource := func(obj client.Object, name, namespace string) {
 		key := types.NamespacedName{Name: name, Namespace: namespace}
 		Eventually(func() error {
@@ -114,8 +119,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Basic Reconciliation", func() {
 		It("should fully provision the workspace resources", func() {
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile provisions resources
+			fullyReconcile()
 
 			By("Verifying the namespace")
 			var ns corev1.Namespace
@@ -153,8 +157,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should manage ResourceQuota and LimitRange lifecycles", func() {
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile provisions resources
+			fullyReconcile()
 
 			By("Verifying creation")
 			var quota corev1.ResourceQuota
@@ -171,8 +174,7 @@ var _ = Describe("Workspace Controller", func() {
 			workspace.Spec.LimitRange = nil
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile deletes resources
+			executeReconcile()
 
 			By("Verifying deletion")
 			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-quota", Namespace: resourceName}, &quota))).To(BeTrue())
@@ -191,8 +193,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should manage NetworkPolicy when Istio is disabled", func() {
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile provisions network policy
+			fullyReconcile()
 
 			By("Verifying NetworkPolicy creation")
 			var netpol networkingv1.NetworkPolicy
@@ -204,8 +205,7 @@ var _ = Describe("Workspace Controller", func() {
 			workspace.Spec.NetworkIsolation.Enabled = false
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile deletes network policy
+			executeReconcile()
 
 			By("Verifying NetworkPolicy deletion")
 			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-network-isolation", Namespace: resourceName}, &netpol))).To(BeTrue())
@@ -223,8 +223,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should sync RoleBindings accurately", func() {
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile provisions role bindings
+			fullyReconcile()
 
 			By("Checking View RoleBinding")
 			var viewBinding rbacv1.RoleBinding
@@ -238,8 +237,7 @@ var _ = Describe("Workspace Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile deletes view binding
+			fullyReconcile()
 
 			By("Verifying View RoleBinding is gone")
 			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-binding-view", Namespace: resourceName}, &viewBinding))).To(BeTrue())
@@ -286,7 +284,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should mirror user subjects as labels on the Workspace CR", func() {
-			executeReconcile() // First reconcile updates labels
+			executeReconcile()
 
 			By("Fetching the reconciled Workspace")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
@@ -301,7 +299,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should update labels when users are added", func() {
-			executeReconcile() // First reconcile updates labels
+			executeReconcile()
 
 			By("Adding a new user")
 			newUser := "editor-user"
@@ -312,7 +310,7 @@ var _ = Describe("Workspace Controller", func() {
 			})
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // Reconcile after user added
+			executeReconcile()
 
 			By("Verifying new user label is added")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
@@ -322,7 +320,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should update labels when users are removed", func() {
-			executeReconcile() // First reconcile updates labels
+			executeReconcile()
 
 			By("Removing the view user")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
@@ -331,7 +329,7 @@ var _ = Describe("Workspace Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // Reconcile after user removed
+			executeReconcile()
 
 			By("Verifying removed user label is gone")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
@@ -340,7 +338,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should update labels when user list is completely replaced", func() {
-			executeReconcile() // First reconcile updates labels
+			executeReconcile()
 
 			By("Replacing all users")
 			newUser1 := "new-admin"
@@ -352,7 +350,7 @@ var _ = Describe("Workspace Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // Reconcile after replacing users
+			executeReconcile()
 
 			By("Verifying labels reflect new users only")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
@@ -371,7 +369,7 @@ var _ = Describe("Workspace Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile() // Reconcile with special character user
+			executeReconcile()
 
 			By("Verifying special character handling")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
@@ -379,14 +377,13 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should not cause infinite reconciliation loops", func() {
-			executeReconcile() // First reconcile updates labels
-			executeReconcile() // Second reconcile provisions resources
+			fullyReconcile()
 
 			By("Getting the labels after full reconciliation")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
 			firstLabels := workspace.Labels
 
-			executeReconcile() // Third reconcile should not update labels
+			executeReconcile()
 
 			By("Verifying labels are stable after third reconcile")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
