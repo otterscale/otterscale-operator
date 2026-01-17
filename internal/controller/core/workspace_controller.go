@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -157,18 +158,34 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 
 // reconcileUserLabels ensures that the Workspace has labels for each user in its spec.
 func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *v1alpha1.Workspace) (bool, error) {
-	newLabels := labelsForWorkspace(w.Name, r.Version, "workspace")
-
-	for _, user := range w.Spec.Users {
-		key := UserLabelPrefix + user.Subject
-		newLabels[key] = "true"
+	newLabels := maps.Clone(w.GetLabels())
+	if newLabels == nil {
+		newLabels = make(map[string]string)
 	}
 
-	if maps.Equal(w.Labels, newLabels) {
+	desiredUserLabels := make(map[string]struct{})
+	for _, user := range w.Spec.Users {
+		key := UserLabelPrefix + user.Subject
+		desiredUserLabels[key] = struct{}{}
+	}
+
+	for k := range newLabels {
+		if strings.HasPrefix(k, UserLabelPrefix) {
+			if _, wanted := desiredUserLabels[k]; !wanted {
+				delete(newLabels, k)
+			}
+		}
+	}
+
+	for k := range desiredUserLabels {
+		newLabels[k] = "true"
+	}
+
+	if maps.Equal(w.GetLabels(), newLabels) {
 		return false, nil
 	}
 
-	w.Labels = newLabels
+	w.SetLabels(newLabels)
 
 	if err := r.Update(ctx, w); err != nil {
 		return false, err

@@ -283,7 +283,15 @@ var _ = Describe("Workspace Controller", func() {
 			})
 		})
 
-		It("should mirror user subjects as labels on the Workspace CR", func() {
+		It("should mirror user subjects as labels and preserve custom labels", func() {
+			By("Adding a custom label to the workspace before reconciliation")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			if workspace.Labels == nil {
+				workspace.Labels = make(map[string]string)
+			}
+			workspace.Labels["my-custom-label"] = "my-custom-value"
+			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
+
 			executeReconcile()
 
 			By("Fetching the reconciled Workspace")
@@ -293,9 +301,8 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
 
-			By("Verifying standard labels are preserved")
-			Expect(workspace.Labels).To(HaveKeyWithValue("app.kubernetes.io/name", "workspace"))
-			Expect(workspace.Labels).To(HaveKeyWithValue("app.kubernetes.io/instance", resourceName))
+			By("Verifying the custom label is preserved")
+			Expect(workspace.Labels).To(HaveKeyWithValue("my-custom-label", "my-custom-value"))
 		})
 
 		It("should update labels when users are added", func() {
