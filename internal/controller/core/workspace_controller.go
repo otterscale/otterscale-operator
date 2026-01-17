@@ -44,6 +44,8 @@ import (
 	"github.com/otterscale/otterscale-operator/api/core/v1alpha1"
 )
 
+const UserLabelPrefix = "user.otterscale.io/"
+
 // WorkspaceReconciler reconciles a Workspace object.
 // It ensures that the underlying Namespace, RBAC roles, ResourceQuotas, and NetworkPolicies
 // match the desired state defined in the Workspace CR.
@@ -75,6 +77,17 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	var w v1alpha1.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &w); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// 0. Reconcile Self Labels (Label Mirroring)
+	updated, err := r.reconcileUserLabels(ctx, &w)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if updated {
+		logger.Info("Workspace labels updated for user indexing, requeuing")
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// 1. Reconcile Namespace (The foundation of the workspace)
@@ -140,6 +153,27 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 	}
 
 	return builder.Complete(r)
+}
+
+// reconcileUserLabels ensures that the Workspace has labels for each user in its spec.
+func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *v1alpha1.Workspace) (bool, error) {
+	newLabels := labelsForWorkspace(w.Name, r.Version, "workspace")
+
+	for _, user := range w.Spec.Users {
+		key := UserLabelPrefix + user.Subject
+		newLabels[key] = "true"
+	}
+
+	if maps.Equal(w.Labels, newLabels) {
+		return false, nil
+	}
+
+	w.Labels = newLabels
+
+	if err := r.Update(ctx, w); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // reconcileNamespace ensures the Namespace exists and is properly labeled.

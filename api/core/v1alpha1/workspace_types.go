@@ -42,9 +42,11 @@ type WorkspaceUser struct {
 	// +required
 	Role WorkspaceUserRole `json:"role"`
 
-	// Subject is the unique identifier of the user (e.g., OIDC subject, email, or username).
+	// Subject is the unique identifier of the user (e.g., OIDC subject or username).
 	// This identifier maps directly to the Kubernetes RBAC Subject.
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]+$`
 	// +required
 	Subject string `json:"subject"`
 

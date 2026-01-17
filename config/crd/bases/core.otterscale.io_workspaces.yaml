@@ -230,9 +230,11 @@ spec:
                       type: string
                     subject:
                       description: |-
-                        Subject is the unique identifier of the user (e.g., OIDC subject, email, or username).
+                        Subject is the unique identifier of the user (e.g., OIDC subject or username).
                         This identifier maps directly to the Kubernetes RBAC Subject.
+                      maxLength: 32
                       minLength: 1
+                      pattern: ^[a-zA-Z0-9]+$
                       type: string
                   required:
                   - role
