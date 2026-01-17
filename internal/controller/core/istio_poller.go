@@ -26,7 +26,8 @@ import (
 )
 
 type IstioPoller struct {
-	Config *rest.Config
+	Config   *rest.Config
+	Interval time.Duration
 }
 
 func (p *IstioPoller) Start(ctx context.Context) error {
@@ -34,7 +35,7 @@ func (p *IstioPoller) Start(ctx context.Context) error {
 
 	logger.Info("Starting Istio detection poller...")
 
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(p.Interval)
 	defer ticker.Stop()
 
 	for {

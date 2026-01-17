@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -130,7 +131,8 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 		builder.Owns(&istioapisecurityv1.AuthorizationPolicy{})
 	} else {
 		poller := &IstioPoller{
-			Config: mgr.GetConfig(),
+			Config:   mgr.GetConfig(),
+			Interval: 15 * time.Minute,
 		}
 		if err := mgr.Add(poller); err != nil {
 			return err
