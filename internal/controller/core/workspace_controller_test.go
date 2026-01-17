@@ -76,6 +76,11 @@ var _ = Describe("Workspace Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	}
 
+	fullyReconcile := func() {
+		executeReconcile() // First reconcile updates labels
+		executeReconcile() // Second reconcile provisions resources
+	}
+
 	fetchResource := func(obj client.Object, name, namespace string) {
 		key := types.NamespacedName{Name: name, Namespace: namespace}
 		Eventually(func() error {
@@ -114,7 +119,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Basic Reconciliation", func() {
 		It("should fully provision the workspace resources", func() {
-			executeReconcile()
+			fullyReconcile()
 
 			By("Verifying the namespace")
 			var ns corev1.Namespace
@@ -152,7 +157,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should manage ResourceQuota and LimitRange lifecycles", func() {
-			executeReconcile()
+			fullyReconcile()
 
 			By("Verifying creation")
 			var quota corev1.ResourceQuota
@@ -188,7 +193,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should manage NetworkPolicy when Istio is disabled", func() {
-			executeReconcile()
+			fullyReconcile()
 
 			By("Verifying NetworkPolicy creation")
 			var netpol networkingv1.NetworkPolicy
@@ -218,7 +223,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should sync RoleBindings accurately", func() {
-			executeReconcile()
+			fullyReconcile()
 
 			By("Checking View RoleBinding")
 			var viewBinding rbacv1.RoleBinding
@@ -232,7 +237,7 @@ var _ = Describe("Workspace Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
-			executeReconcile()
+			fullyReconcile()
 
 			By("Verifying View RoleBinding is gone")
 			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-binding-view", Namespace: resourceName}, &viewBinding))).To(BeTrue())
@@ -265,6 +270,131 @@ var _ = Describe("Workspace Controller", func() {
 			err := viewClient.Update(ctx, &latestWs)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("only users with the 'admin' role"))
+		})
+	})
+
+	Context("User Label Synchronization", func() {
+		BeforeEach(func() {
+			workspace = makeWorkspace(resourceName, func(ws *corev1alpha1.Workspace) {
+				ws.Spec.Users = []corev1alpha1.WorkspaceUser{
+					{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+					{Role: corev1alpha1.WorkspaceUserRoleView, Subject: viewUser},
+				}
+			})
+		})
+
+		It("should mirror user subjects as labels and preserve custom labels", func() {
+			By("Adding a custom label to the workspace before reconciliation")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			if workspace.Labels == nil {
+				workspace.Labels = make(map[string]string)
+			}
+			workspace.Labels["my-custom-label"] = "my-custom-value"
+			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
+
+			executeReconcile()
+
+			By("Fetching the reconciled Workspace")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+
+			By("Verifying user labels are created")
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
+
+			By("Verifying the custom label is preserved")
+			Expect(workspace.Labels).To(HaveKeyWithValue("my-custom-label", "my-custom-value"))
+		})
+
+		It("should update labels when users are added", func() {
+			executeReconcile()
+
+			By("Adding a new user")
+			newUser := "editor-user"
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			workspace.Spec.Users = append(workspace.Spec.Users, corev1alpha1.WorkspaceUser{
+				Role:    corev1alpha1.WorkspaceUserRoleEdit,
+				Subject: newUser,
+			})
+			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
+
+			executeReconcile()
+
+			By("Verifying new user label is added")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser, "true"))
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
+		})
+
+		It("should update labels when users are removed", func() {
+			executeReconcile()
+
+			By("Removing the view user")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
+				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+			}
+			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
+
+			executeReconcile()
+
+			By("Verifying removed user label is gone")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
+			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + viewUser))
+		})
+
+		It("should update labels when user list is completely replaced", func() {
+			executeReconcile()
+
+			By("Replacing all users")
+			newUser1 := "new-admin"
+			newUser2 := "new-editor"
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
+				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: newUser1},
+				{Role: corev1alpha1.WorkspaceUserRoleEdit, Subject: newUser2},
+			}
+			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
+
+			executeReconcile()
+
+			By("Verifying labels reflect new users only")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser1, "true"))
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser2, "true"))
+			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + adminUser))
+			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + viewUser))
+		})
+
+		It("should handle users with special characters in their subject", func() {
+			specialUser := "user.example.com"
+			By("Updating workspace with special user")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
+				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: specialUser},
+			}
+			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
+
+			executeReconcile()
+
+			By("Verifying special character handling")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+specialUser, "true"))
+		})
+
+		It("should not cause infinite reconciliation loops", func() {
+			fullyReconcile()
+
+			By("Getting the labels after full reconciliation")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			firstLabels := workspace.Labels
+
+			executeReconcile()
+
+			By("Verifying labels are stable after third reconcile")
+			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			Expect(workspace.Labels).To(Equal(firstLabels))
 		})
 	})
 

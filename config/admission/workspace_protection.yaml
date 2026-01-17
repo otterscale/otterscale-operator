@@ -12,5 +12,5 @@ spec:
         resources: ["workspaces"]
   validations:
     - expression: >-
-        'system:masters' in request.userInfo.groups || oldObject.spec.users.exists(u, u.subject == request.userInfo.username && u.role == 'admin')
+        request.userInfo.groups.exists(g, g in ['system:masters', 'kubeadm:cluster-admins']) || oldObject.spec.users.exists(u, u.subject == request.userInfo.username && u.role == 'admin')
       message: "only users with the 'admin' role defined in this workspace can modify or delete it."

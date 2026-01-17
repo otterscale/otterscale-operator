@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -43,6 +44,8 @@ import (
 
 	"github.com/otterscale/otterscale-operator/api/core/v1alpha1"
 )
+
+const UserLabelPrefix = "user.otterscale.io/"
 
 // WorkspaceReconciler reconciles a Workspace object.
 // It ensures that the underlying Namespace, RBAC roles, ResourceQuotas, and NetworkPolicies
@@ -75,6 +78,17 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	var w v1alpha1.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &w); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// 0. Reconcile Self Labels (Label Mirroring)
+	updated, err := r.reconcileUserLabels(ctx, &w)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if updated {
+		logger.Info("Workspace labels updated for user indexing, requeuing")
+		return ctrl.Result{}, nil
 	}
 
 	// 1. Reconcile Namespace (The foundation of the workspace)
@@ -140,6 +154,43 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 	}
 
 	return builder.Complete(r)
+}
+
+// reconcileUserLabels ensures that the Workspace has labels for each user in its spec.
+func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *v1alpha1.Workspace) (bool, error) {
+	newLabels := maps.Clone(w.GetLabels())
+	if newLabels == nil {
+		newLabels = make(map[string]string)
+	}
+
+	desiredUserLabels := make(map[string]struct{})
+	for _, user := range w.Spec.Users {
+		key := UserLabelPrefix + user.Subject
+		desiredUserLabels[key] = struct{}{}
+	}
+
+	for k := range newLabels {
+		if strings.HasPrefix(k, UserLabelPrefix) {
+			if _, wanted := desiredUserLabels[k]; !wanted {
+				delete(newLabels, k)
+			}
+		}
+	}
+
+	for k := range desiredUserLabels {
+		newLabels[k] = "true"
+	}
+
+	if maps.Equal(w.GetLabels(), newLabels) {
+		return false, nil
+	}
+
+	w.SetLabels(newLabels)
+
+	if err := r.Update(ctx, w); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // reconcileNamespace ensures the Namespace exists and is properly labeled.
