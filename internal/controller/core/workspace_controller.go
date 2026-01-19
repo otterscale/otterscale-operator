@@ -510,7 +510,14 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1a
 
 // updateStatus calculates the status based on the current state and updates the resource.
 func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Workspace) error {
-	newStatus := w.Status.DeepCopy()
+	// Fetch the latest version to avoid conflicts
+	latest := &v1alpha1.Workspace{}
+	if err := r.Get(ctx, types.NamespacedName{Name: w.Name, Namespace: w.Namespace}, latest); err != nil {
+		return err
+	}
+
+	// Deep copy to avoid mutating the fetched object
+	newStatus := latest.Status.DeepCopy()
 
 	// Update Namespace reference
 	newStatus.Namespace = &corev1.ObjectReference{
@@ -600,9 +607,9 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	})
 
 	// Check for changes before making an API call to reduce load on the API server
-	if !equality.Semantic.DeepEqual(w.Status, *newStatus) {
-		w.Status = *newStatus
-		if err := r.Status().Update(ctx, w); err != nil {
+	if !equality.Semantic.DeepEqual(latest.Status, *newStatus) {
+		latest.Status = *newStatus
+		if err := r.Status().Update(ctx, latest); err != nil {
 			return err
 		}
 		log.FromContext(ctx).Info("Workspace status updated")
