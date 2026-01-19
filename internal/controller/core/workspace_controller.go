@@ -377,7 +377,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 	}
 
 	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
-		return client.IgnoreNotFound(r.Delete(ctx, peer))
+		return ignoreNoMatchNotFound(r.Delete(ctx, peer))
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
@@ -410,7 +410,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 	}
 
 	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
-		return client.IgnoreNotFound(r.Delete(ctx, policy))
+		return ignoreNoMatchNotFound(r.Delete(ctx, policy))
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
@@ -650,4 +650,12 @@ func isOwned(refs []metav1.OwnerReference, uid types.UID) bool {
 		}
 	}
 	return false
+}
+
+// ignoreNoMatchNotFound ignores NoMatch errors and NotFound errors.
+func ignoreNoMatchNotFound(err error) error {
+	if meta.IsNoMatchError(err) {
+		return nil
+	}
+	return client.IgnoreNotFound(err)
 }
