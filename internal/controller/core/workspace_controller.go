@@ -365,6 +365,39 @@ func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *
 	return r.reconcileNetworkPolicy(ctx, w)
 }
 
+// reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
+func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace) error {
+	name := w.Name + "-strict-mtls"
+	peer := &istioapisecurityv1.PeerAuthentication{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: w.Name,
+		},
+	}
+
+	if !w.Spec.NetworkIsolation.Enabled {
+		return client.IgnoreNotFound(r.Delete(ctx, peer))
+	}
+
+	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
+		peer.Labels = labelsForWorkspace(w.Name, r.Version, "policy")
+		peer.Spec = istiosecurityv1.PeerAuthentication{
+			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
+			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
+				Mode: istiosecurityv1.PeerAuthentication_MutualTLS_STRICT,
+			},
+		}
+		return ctrlutil.SetControllerReference(w, peer, r.Scheme)
+	})
+	if err != nil {
+		return err
+	}
+	if op != ctrlutil.OperationResultNone {
+		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", name)
+	}
+	return nil
+}
+
 // reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
 func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
 	name := w.Name + "-network-isolation"
@@ -409,39 +442,6 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 	}
 	if op != ctrlutil.OperationResultNone {
 		log.FromContext(ctx).Info("AuthorizationPolicy reconciled", "operation", op, "name", name)
-	}
-	return nil
-}
-
-// reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
-func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace) error {
-	name := w.Name + "-strict-mtls"
-	peer := &istioapisecurityv1.PeerAuthentication{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: w.Name,
-		},
-	}
-
-	if !w.Spec.NetworkIsolation.Enabled {
-		return client.IgnoreNotFound(r.Delete(ctx, peer))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
-		peer.Labels = labelsForWorkspace(w.Name, r.Version, "policy")
-		peer.Spec = istiosecurityv1.PeerAuthentication{
-			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
-			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
-				Mode: istiosecurityv1.PeerAuthentication_MutualTLS_STRICT,
-			},
-		}
-		return ctrlutil.SetControllerReference(w, peer, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", name)
 	}
 	return nil
 }
@@ -556,6 +556,35 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 		}
 	} else {
 		newStatus.LimitRange = nil
+	}
+
+	// Update Network Isolation resources
+	if !w.Spec.NetworkIsolation.Enabled {
+		if r.istioEnabled {
+			newStatus.PeerAuthentication = &corev1.ObjectReference{
+				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
+				Kind:       "PeerAuthentication",
+				Name:       w.Name + "-strict-mtls",
+				Namespace:  w.Name,
+			}
+			newStatus.AuthorizationPolicy = &corev1.ObjectReference{
+				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
+				Kind:       "AuthorizationPolicy",
+				Name:       w.Name + "-network-isolation",
+				Namespace:  w.Name,
+			}
+		} else {
+			newStatus.NetworkPolicy = &corev1.ObjectReference{
+				APIVersion: networkingv1.SchemeGroupVersion.String(),
+				Kind:       "NetworkPolicy",
+				Name:       w.Name + "-network-isolation",
+				Namespace:  w.Name,
+			}
+		}
+	} else {
+		newStatus.PeerAuthentication = nil
+		newStatus.AuthorizationPolicy = nil
+		newStatus.NetworkPolicy = nil
 	}
 
 	// Set Ready condition

@@ -161,6 +161,21 @@ func (in *WorkspaceStatus) DeepCopyInto(out *WorkspaceStatus) {
 		*out = make([]v1.ObjectReference, len(*in))
 		copy(*out, *in)
 	}
+	if in.PeerAuthentication != nil {
+		in, out := &in.PeerAuthentication, &out.PeerAuthentication
+		*out = new(v1.ObjectReference)
+		**out = **in
+	}
+	if in.AuthorizationPolicy != nil {
+		in, out := &in.AuthorizationPolicy, &out.AuthorizationPolicy
+		*out = new(v1.ObjectReference)
+		**out = **in
+	}
+	if in.NetworkPolicy != nil {
+		in, out := &in.NetworkPolicy, &out.NetworkPolicy
+		*out = new(v1.ObjectReference)
+		**out = **in
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

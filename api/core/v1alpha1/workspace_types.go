@@ -116,6 +116,18 @@ type WorkspaceStatus struct {
 	// +optional
 	RoleBindings []corev1.ObjectReference `json:"roleBindings,omitempty"`
 
+	// PeerAuthentication is a reference to the Istio PeerAuthentication resource for mTLS settings.
+	// +optional
+	PeerAuthentication *corev1.ObjectReference `json:"peerAuthentication,omitempty"`
+
+	// AuthorizationPolicy is a reference to the Istio AuthorizationPolicy enforcing network isolation.
+	// +optional
+	AuthorizationPolicy *corev1.ObjectReference `json:"authorizationPolicy,omitempty"`
+
+	// NetworkPolicy is a reference to the corev1.NetworkPolicy enforcing network isolation.
+	// +optional
+	NetworkPolicy *corev1.ObjectReference `json:"networkPolicy,omitempty"`
+
 	// Conditions store the status conditions of the Workspace (e.g., Ready, Failed).
 	// +listType=map
 	// +listMapKey=type
