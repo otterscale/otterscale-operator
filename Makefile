@@ -2,7 +2,7 @@
 VERSION=$(shell git describe --tags --always)
 
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/otterscale/otterscale-operator:$(VERSION)
+IMG ?= otterscale-operator:$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
