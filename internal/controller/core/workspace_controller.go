@@ -143,6 +143,7 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 		Named("workspace")
 
 	if r.istioEnabled {
+		builder.Owns(&istioapisecurityv1.PeerAuthentication{})
 		builder.Owns(&istioapisecurityv1.AuthorizationPolicy{})
 	} else {
 		poller := &IstioPoller{
