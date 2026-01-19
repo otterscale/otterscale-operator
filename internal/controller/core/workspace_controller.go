@@ -560,10 +560,6 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	}
 
 	// Update Network Isolation resources
-	newStatus.PeerAuthentication = nil
-	newStatus.AuthorizationPolicy = nil
-	newStatus.NetworkPolicy = nil
-
 	if w.Spec.NetworkIsolation.Enabled {
 		if r.istioEnabled {
 			newStatus.PeerAuthentication = &corev1.ObjectReference{
@@ -578,7 +574,10 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 				Name:       w.Name + "-network-isolation",
 				Namespace:  w.Name,
 			}
+			newStatus.NetworkPolicy = nil
 		} else {
+			newStatus.PeerAuthentication = nil
+			newStatus.AuthorizationPolicy = nil
 			newStatus.NetworkPolicy = &corev1.ObjectReference{
 				APIVersion: networkingv1.SchemeGroupVersion.String(),
 				Kind:       "NetworkPolicy",
@@ -586,6 +585,10 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 				Namespace:  w.Name,
 			}
 		}
+	} else {
+		newStatus.PeerAuthentication = nil
+		newStatus.AuthorizationPolicy = nil
+		newStatus.NetworkPolicy = nil
 	}
 
 	// Set Ready condition
