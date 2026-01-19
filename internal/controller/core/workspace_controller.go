@@ -357,17 +357,17 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *v1alph
 
 // reconcileNetworkIsolation decides whether to use Istio or standard NetworkPolicy.
 func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *v1alpha1.Workspace) error {
-	if err := r.reconcilePeerAuthentication(ctx, w, !r.istioEnabled); err != nil {
+	if err := r.reconcilePeerAuthentication(ctx, w); err != nil {
 		return err
 	}
-	if err := r.reconcileAuthorizationPolicy(ctx, w, !r.istioEnabled); err != nil {
+	if err := r.reconcileAuthorizationPolicy(ctx, w); err != nil {
 		return err
 	}
-	return r.reconcileNetworkPolicy(ctx, w, r.istioEnabled)
+	return r.reconcileNetworkPolicy(ctx, w)
 }
 
 // reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
-func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace, delete bool) error {
+func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace) error {
 	name := w.Name + "-strict-mtls"
 	peer := &istioapisecurityv1.PeerAuthentication{
 		ObjectMeta: metav1.ObjectMeta{
@@ -376,7 +376,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 		},
 	}
 
-	if !w.Spec.NetworkIsolation.Enabled || delete {
+	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
 		return client.IgnoreNotFound(r.Delete(ctx, peer))
 	}
 
@@ -400,7 +400,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 }
 
 // reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
-func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *v1alpha1.Workspace, delete bool) error {
+func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
 	name := w.Name + "-network-isolation"
 	policy := &istioapisecurityv1.AuthorizationPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -409,7 +409,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 		},
 	}
 
-	if !w.Spec.NetworkIsolation.Enabled || delete {
+	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
 		return client.IgnoreNotFound(r.Delete(ctx, policy))
 	}
 
@@ -448,7 +448,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 }
 
 // reconcileNetworkPolicy creates K8s NetworkPolicies for environments without Istio.
-func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1alpha1.Workspace, delete bool) error {
+func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
 	name := w.Name + "-network-isolation"
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -457,7 +457,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1a
 		},
 	}
 
-	if !w.Spec.NetworkIsolation.Enabled || delete {
+	if !w.Spec.NetworkIsolation.Enabled || r.istioEnabled {
 		return client.IgnoreNotFound(r.Delete(ctx, policy))
 	}
 
