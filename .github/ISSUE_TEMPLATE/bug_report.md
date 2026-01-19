@@ -1,10 +1,9 @@
 ---
 name: "\U0001F41B Bug report"
 about: Create a report to help us improve
-title: ''
-labels: ''
-assignees: ''
-
+title: ""
+labels: ""
+assignees: ""
 ---
 
 ## Summary
@@ -24,4 +23,4 @@ assignees: ''
 <!-- This will help us understand the issue better and resolve it faster. -->
 
 - OtterScale: 1.0.?
-- Go: 1.23.?
+- Go: 1.25.?
