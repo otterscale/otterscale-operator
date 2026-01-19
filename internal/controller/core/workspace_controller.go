@@ -357,17 +357,17 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *v1alph
 
 // reconcileNetworkIsolation decides whether to use Istio or standard NetworkPolicy.
 func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *v1alpha1.Workspace) error {
-	if r.istioEnabled {
-		if err := r.reconcilePeerAuthentication(ctx, w); err != nil {
-			return err
-		}
-		return r.reconcileAuthorizationPolicy(ctx, w)
+	if err := r.reconcilePeerAuthentication(ctx, w, !r.istioEnabled); err != nil {
+		return err
 	}
-	return r.reconcileNetworkPolicy(ctx, w)
+	if err := r.reconcileAuthorizationPolicy(ctx, w, !r.istioEnabled); err != nil {
+		return err
+	}
+	return r.reconcileNetworkPolicy(ctx, w, r.istioEnabled)
 }
 
 // reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
-func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace, delete bool) error {
 	name := w.Name + "-strict-mtls"
 	peer := &istioapisecurityv1.PeerAuthentication{
 		ObjectMeta: metav1.ObjectMeta{
@@ -376,7 +376,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 		},
 	}
 
-	if !w.Spec.NetworkIsolation.Enabled {
+	if !w.Spec.NetworkIsolation.Enabled || delete {
 		return client.IgnoreNotFound(r.Delete(ctx, peer))
 	}
 
@@ -400,7 +400,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 }
 
 // reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
-func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *v1alpha1.Workspace, delete bool) error {
 	name := w.Name + "-network-isolation"
 	policy := &istioapisecurityv1.AuthorizationPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -409,7 +409,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 		},
 	}
 
-	if !w.Spec.NetworkIsolation.Enabled {
+	if !w.Spec.NetworkIsolation.Enabled || delete {
 		return client.IgnoreNotFound(r.Delete(ctx, policy))
 	}
 
@@ -448,7 +448,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 }
 
 // reconcileNetworkPolicy creates K8s NetworkPolicies for environments without Istio.
-func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1alpha1.Workspace, delete bool) error {
 	name := w.Name + "-network-isolation"
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -457,7 +457,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1a
 		},
 	}
 
-	if !w.Spec.NetworkIsolation.Enabled {
+	if !w.Spec.NetworkIsolation.Enabled || delete {
 		return client.IgnoreNotFound(r.Delete(ctx, policy))
 	}
 
@@ -510,14 +510,8 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1a
 
 // updateStatus calculates the status based on the current state and updates the resource.
 func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Workspace) error {
-	// Fetch the latest version to avoid conflicts
-	latest := &v1alpha1.Workspace{}
-	if err := r.Get(ctx, types.NamespacedName{Name: w.Name, Namespace: w.Namespace}, latest); err != nil {
-		return err
-	}
-
 	// Deep copy to avoid mutating the fetched object
-	newStatus := latest.Status.DeepCopy()
+	newStatus := w.Status.DeepCopy()
 
 	// Update Namespace reference
 	newStatus.Namespace = &corev1.ObjectReference{
@@ -607,9 +601,9 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	})
 
 	// Check for changes before making an API call to reduce load on the API server
-	if !equality.Semantic.DeepEqual(latest.Status, *newStatus) {
-		latest.Status = *newStatus
-		if err := r.Status().Update(ctx, latest); err != nil {
+	if !equality.Semantic.DeepEqual(&w.Status, newStatus) {
+		w.Status = *newStatus
+		if err := r.Status().Update(ctx, w); err != nil {
 			return err
 		}
 		log.FromContext(ctx).Info("Workspace status updated")
