@@ -601,7 +601,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	})
 
 	// Check for changes before making an API call to reduce load on the API server
-	if !equality.Semantic.DeepEqual(&w.Status, newStatus) {
+	if !equality.Semantic.DeepEqual(w.Status, *newStatus) {
 		w.Status = *newStatus
 		if err := r.Status().Update(ctx, w); err != nil {
 			return err
