@@ -73,6 +73,8 @@ type WorkspaceNetworkIsolation struct {
 
 // WorkspaceSpec defines the desired state of the Workspace.
 // It includes user management, resource constraints, and network security settings.
+//
+// +kubebuilder:validation:XValidation:rule="self.users.exists(u, u.role == 'admin')",message="At least one user must have the 'admin' role"
 type WorkspaceSpec struct {
 	// Users is the list of users granted access to this workspace.
 	// +listType=map
