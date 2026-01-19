@@ -559,7 +559,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	}
 
 	// Update Network Isolation resources
-	if !w.Spec.NetworkIsolation.Enabled {
+	if w.Spec.NetworkIsolation.Enabled {
 		if r.istioEnabled {
 			newStatus.PeerAuthentication = &corev1.ObjectReference{
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
