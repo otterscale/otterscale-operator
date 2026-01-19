@@ -35,6 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
+
 	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
 	corecontroller "github.com/otterscale/otterscale-operator/internal/controller/core"
 	// +kubebuilder:scaffold:imports
@@ -50,6 +52,8 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(corev1alpha1.AddToScheme(scheme))
+
+	utilruntime.Must(istioapisecurityv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

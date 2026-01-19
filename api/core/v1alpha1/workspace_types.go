@@ -42,9 +42,11 @@ type WorkspaceUser struct {
 	// +required
 	Role WorkspaceUserRole `json:"role"`
 
-	// Subject is the unique identifier of the user (e.g., OIDC subject, email, or username).
+	// Subject is the unique identifier of the user (e.g., OIDC subject or username).
 	// This identifier maps directly to the Kubernetes RBAC Subject.
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$`
 	// +required
 	Subject string `json:"subject"`
 
@@ -71,6 +73,8 @@ type WorkspaceNetworkIsolation struct {
 
 // WorkspaceSpec defines the desired state of the Workspace.
 // It includes user management, resource constraints, and network security settings.
+//
+// +kubebuilder:validation:XValidation:rule="self.users.exists(u, u.role == 'admin')",message="At least one user must have the 'admin' role"
 type WorkspaceSpec struct {
 	// Users is the list of users granted access to this workspace.
 	// +listType=map
@@ -111,6 +115,18 @@ type WorkspaceStatus struct {
 	// +listType=atomic
 	// +optional
 	RoleBindings []corev1.ObjectReference `json:"roleBindings,omitempty"`
+
+	// PeerAuthentication is a reference to the Istio PeerAuthentication resource for mTLS settings.
+	// +optional
+	PeerAuthentication *corev1.ObjectReference `json:"peerAuthentication,omitempty"`
+
+	// AuthorizationPolicy is a reference to the Istio AuthorizationPolicy enforcing network isolation.
+	// +optional
+	AuthorizationPolicy *corev1.ObjectReference `json:"authorizationPolicy,omitempty"`
+
+	// NetworkPolicy is a reference to the corev1.NetworkPolicy enforcing network isolation.
+	// +optional
+	NetworkPolicy *corev1.ObjectReference `json:"networkPolicy,omitempty"`
 
 	// Conditions store the status conditions of the Workspace (e.g., Ready, Failed).
 	// +listType=map
