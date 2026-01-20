@@ -6,4 +6,34 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: workspace-sample
 spec:
-  # TODO(user): Add fields here
+  users:
+    - name: "aaa"
+      subject: "aaa"
+      role: "admin"
+    - name: "bbb"
+      subject: "bbb"
+      role: "edit"
+    - name: "ccc"
+      subject: "ccc"
+      role: "view"
+  resourceQuota:
+    hard:
+      requests.cpu: "1"
+      requests.memory: "1Gi"
+      limits.cpu: "2"
+      limits.memory: "2Gi"
+      requests.nvidia.com/gpu: 4
+  limitRange:
+    limits:
+      - default:
+          cpu: 500m
+        defaultRequest:
+          cpu: 500m
+        max:
+          cpu: "1"
+        min:
+          cpu: 100m
+        type: Container
+  networkIsolation:
+    enabled: true
+    allowedNamespaces: ["kube-system", "otterscale-operator-system"]
