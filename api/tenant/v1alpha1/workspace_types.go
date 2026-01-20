@@ -76,6 +76,15 @@ type WorkspaceNetworkIsolation struct {
 //
 // +kubebuilder:validation:XValidation:rule="self.users.exists(u, u.role == 'admin')",message="At least one user must have the 'admin' role"
 type WorkspaceSpec struct {
+	// Namespace is the name of the Kubernetes Namespace to be created for this workspace.
+	// It must be unique across all Workspaces.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable"
+	// +required
+	Namespace string `json:"namespace"`
+
 	// Users is the list of users granted access to this workspace.
 	// +listType=map
 	// +listMapKey=subject

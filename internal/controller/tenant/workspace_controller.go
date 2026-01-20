@@ -196,7 +196,7 @@ func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *tenant
 
 // reconcileNamespace ensures the Namespace exists and is properly labeled.
 func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Name
+	name := w.Spec.Namespace
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -206,14 +206,14 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, namespace, func() error {
 		// Safety check: Prevent taking over existing namespaces not owned by us
 		if !isOwned(namespace.OwnerReferences, w.UID) && !namespace.CreationTimestamp.IsZero() {
-			return fmt.Errorf("namespace %s exists but is not owned by this workspace", w.Name)
+			return fmt.Errorf("namespace %s exists but is not owned by this workspace", name)
 		}
 
 		if namespace.Labels == nil {
 			namespace.Labels = map[string]string{}
 		}
 
-		maps.Copy(namespace.Labels, labelsForWorkspace(w.Name, r.Version, "namespace"))
+		maps.Copy(namespace.Labels, labelsForWorkspace(w.Name, r.Version))
 
 		// Enable Istio sidecar injection if Istio is detected
 		if r.istioEnabled {
@@ -263,7 +263,7 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenan
 	binding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: w.Name,
+			Namespace: w.Spec.Namespace,
 		},
 	}
 
@@ -273,7 +273,7 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenan
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-		binding.Labels = labelsForWorkspace(w.Name, r.Version, "binding")
+		binding.Labels = labelsForWorkspace(w.Name, r.Version)
 		binding.Subjects = []rbacv1.Subject{}
 		for _, u := range users {
 			binding.Subjects = append(binding.Subjects, rbacv1.Subject{
@@ -304,7 +304,7 @@ func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *ten
 	quota := &corev1.ResourceQuota{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: w.Name,
+			Namespace: w.Spec.Namespace,
 		},
 	}
 
@@ -313,7 +313,7 @@ func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *ten
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, quota, func() error {
-		quota.Labels = labelsForWorkspace(w.Name, r.Version, "quota")
+		quota.Labels = labelsForWorkspace(w.Name, r.Version)
 		quota.Spec = *w.Spec.ResourceQuota
 		return ctrlutil.SetControllerReference(w, quota, r.Scheme)
 	})
@@ -332,7 +332,7 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenant
 	limits := &corev1.LimitRange{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: w.Name,
+			Namespace: w.Spec.Namespace,
 		},
 	}
 
@@ -341,7 +341,7 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenant
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, limits, func() error {
-		limits.Labels = labelsForWorkspace(w.Name, r.Version, "limits")
+		limits.Labels = labelsForWorkspace(w.Name, r.Version)
 		limits.Spec = *w.Spec.LimitRange
 		return ctrlutil.SetControllerReference(w, limits, r.Scheme)
 	})
@@ -371,7 +371,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 	peer := &istioapisecurityv1.PeerAuthentication{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: w.Name,
+			Namespace: w.Spec.Namespace,
 		},
 	}
 
@@ -380,7 +380,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
-		peer.Labels = labelsForWorkspace(w.Name, r.Version, "policy")
+		peer.Labels = labelsForWorkspace(w.Name, r.Version)
 		peer.Spec = istiosecurityv1.PeerAuthentication{
 			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
 			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
@@ -404,7 +404,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 	policy := &istioapisecurityv1.AuthorizationPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: w.Name,
+			Namespace: w.Spec.Namespace,
 		},
 	}
 
@@ -413,9 +413,9 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = labelsForWorkspace(w.Name, r.Version, "policy")
+		policy.Labels = labelsForWorkspace(w.Name, r.Version)
 
-		allowedNamespaces := []string{w.Name} // Always allow traffic within the workspace
+		allowedNamespaces := []string{w.Spec.Namespace} // Always allow traffic within the workspace
 		allowedNamespaces = append(allowedNamespaces, w.Spec.NetworkIsolation.AllowedNamespaces...)
 
 		policy.Spec = istiosecurityv1.AuthorizationPolicy{
@@ -452,7 +452,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *ten
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: w.Name,
+			Namespace: w.Spec.Namespace,
 		},
 	}
 
@@ -461,7 +461,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *ten
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = labelsForWorkspace(w.Name, r.Version, "policy")
+		policy.Labels = labelsForWorkspace(w.Name, r.Version)
 
 		// Rule 1: Allow traffic from within the same namespace
 		ingressRules := []networkingv1.NetworkPolicyIngressRule{
@@ -516,7 +516,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 	newStatus.NamespaceRef = &corev1.ObjectReference{
 		APIVersion: corev1.SchemeGroupVersion.String(),
 		Kind:       "Namespace",
-		Name:       w.Name,
+		Name:       w.Spec.Namespace,
 	}
 
 	// Update RoleBindings references
@@ -531,7 +531,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 			APIVersion: rbacv1.SchemeGroupVersion.String(),
 			Kind:       "RoleBinding",
 			Name:       w.Name + "-binding-" + string(role),
-			Namespace:  w.Name,
+			Namespace:  w.Spec.Namespace,
 		})
 	}
 
@@ -541,7 +541,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 			APIVersion: corev1.SchemeGroupVersion.String(),
 			Kind:       "ResourceQuota",
 			Name:       w.Name + "-quota",
-			Namespace:  w.Name,
+			Namespace:  w.Spec.Namespace,
 		}
 	} else {
 		newStatus.ResourceQuotaRef = nil
@@ -553,7 +553,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 			APIVersion: corev1.SchemeGroupVersion.String(),
 			Kind:       "LimitRange",
 			Name:       w.Name + "-limits",
-			Namespace:  w.Name,
+			Namespace:  w.Spec.Namespace,
 		}
 	} else {
 		newStatus.LimitRangeRef = nil
@@ -566,13 +566,13 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
 				Kind:       "PeerAuthentication",
 				Name:       w.Name + "-strict-mtls",
-				Namespace:  w.Name,
+				Namespace:  w.Spec.Namespace,
 			}
 			newStatus.AuthorizationPolicyRef = &corev1.ObjectReference{
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
 				Kind:       "AuthorizationPolicy",
 				Name:       w.Name + "-network-isolation",
-				Namespace:  w.Name,
+				Namespace:  w.Spec.Namespace,
 			}
 			newStatus.NetworkPolicyRef = nil
 		} else {
@@ -582,7 +582,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 				APIVersion: networkingv1.SchemeGroupVersion.String(),
 				Kind:       "NetworkPolicy",
 				Name:       w.Name + "-network-isolation",
-				Namespace:  w.Name,
+				Namespace:  w.Spec.Namespace,
 			}
 		}
 	} else {
@@ -611,6 +611,18 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 	return nil
 }
 
+// labelsForWorkspace returns a standard set of labels for resources managed by this operator.
+func labelsForWorkspace(workspace, version string) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":       "workspace",
+		"app.kubernetes.io/instance":   workspace,
+		"app.kubernetes.io/version":    version,
+		"app.kubernetes.io/component":  "workspace",
+		"app.kubernetes.io/part-of":    "otterscale",
+		"app.kubernetes.io/managed-by": "otterscale-operator",
+	}
+}
+
 // isResourceSupported checks if CRD exist in the cluster.
 // This allows the controller to adapt its behavior based on the environment.
 func isResourceSupported(dc *discovery.DiscoveryClient, groupVersion string) bool {
@@ -618,18 +630,6 @@ func isResourceSupported(dc *discovery.DiscoveryClient, groupVersion string) boo
 		return false
 	}
 	return true
-}
-
-// labelsForWorkspace returns a standard set of labels for resources managed by this operator.
-func labelsForWorkspace(name, version, component string) map[string]string {
-	return map[string]string{
-		"app.kubernetes.io/name":       "workspace",
-		"app.kubernetes.io/instance":   name,
-		"app.kubernetes.io/version":    version,
-		"app.kubernetes.io/component":  component,
-		"app.kubernetes.io/part-of":    "otterscale",
-		"app.kubernetes.io/managed-by": "otterscale-operator",
-	}
 }
 
 // isOwned checks if the object is owned by the given UID to prevent adoption conflicts.

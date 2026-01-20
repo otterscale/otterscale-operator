@@ -47,19 +47,20 @@ var _ = Describe("Workspace Controller", func() {
 	)
 
 	var (
-		ctx          context.Context
-		reconciler   *WorkspaceReconciler
-		workspace    *tenantv1alpha1.Workspace
-		nsName       types.NamespacedName
-		resourceName string
+		ctx           context.Context
+		reconciler    *WorkspaceReconciler
+		workspace     *tenantv1alpha1.Workspace
+		resourceName  string
+		namespaceName string
 	)
 
 	// --- Helpers ---
 
-	makeWorkspace := func(name string, mods ...func(*tenantv1alpha1.Workspace)) *tenantv1alpha1.Workspace {
+	makeWorkspace := func(name, namespace string, mods ...func(*tenantv1alpha1.Workspace)) *tenantv1alpha1.Workspace {
 		ws := &tenantv1alpha1.Workspace{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec: tenantv1alpha1.WorkspaceSpec{
+				Namespace: namespace,
 				Users: []tenantv1alpha1.WorkspaceUser{
 					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 				},
@@ -72,6 +73,7 @@ var _ = Describe("Workspace Controller", func() {
 	}
 
 	executeReconcile := func() {
+		nsName := types.NamespacedName{Name: resourceName}
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
 		Expect(err).NotTo(HaveOccurred())
 	}
@@ -93,13 +95,13 @@ var _ = Describe("Workspace Controller", func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		resourceName = string(uuid.NewUUID())
-		nsName = types.NamespacedName{Name: resourceName}
+		namespaceName = string(uuid.NewUUID())
 		reconciler = &WorkspaceReconciler{
 			Client:       k8sClient,
 			Scheme:       k8sClient.Scheme(),
 			istioEnabled: false,
 		}
-		workspace = makeWorkspace(resourceName)
+		workspace = makeWorkspace(resourceName, namespaceName)
 	})
 
 	JustBeforeEach(func() {
@@ -107,6 +109,7 @@ var _ = Describe("Workspace Controller", func() {
 	})
 
 	AfterEach(func() {
+		nsName := types.NamespacedName{Name: resourceName}
 		if err := k8sClient.Get(ctx, nsName, workspace); err == nil {
 			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
 			Eventually(func() bool {
@@ -123,17 +126,17 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying the namespace")
 			var ns corev1.Namespace
-			fetchResource(&ns, resourceName, "")
-			Expect(ns.Labels).To(HaveKeyWithValue("app.kubernetes.io/instance", resourceName))
+			fetchResource(&ns, namespaceName, "")
+			Expect(ns.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "otterscale-operator"))
 
 			By("Verifying the Admin RoleBinding")
 			var rb rbacv1.RoleBinding
-			fetchResource(&rb, resourceName+"-binding-admin", resourceName)
+			fetchResource(&rb, resourceName+"-binding-admin", namespaceName)
 			Expect(rb.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(adminUser))))
 
 			By("Verifying status updates")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			Expect(workspace.Status.NamespaceRef.Name).To(Equal(resourceName))
+			fetchResource(workspace, resourceName, "")
+			Expect(workspace.Status.NamespaceRef.Name).To(Equal(namespaceName))
 
 			readyCond := meta.FindStatusCondition(workspace.Status.Conditions, "Ready")
 			Expect(readyCond).NotTo(BeNil())
@@ -143,7 +146,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Resource Management", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
 				ws.Spec.ResourceQuota = &corev1.ResourceQuotaSpec{
 					Hard: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")},
 				}
@@ -161,15 +164,15 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying creation")
 			var quota corev1.ResourceQuota
-			fetchResource(&quota, resourceName+"-quota", resourceName)
+			fetchResource(&quota, resourceName+"-quota", namespaceName)
 			Expect(quota.Spec.Hard[corev1.ResourcePods]).To(Equal(resource.MustParse("10")))
 
 			var limit corev1.LimitRange
-			fetchResource(&limit, resourceName+"-limits", resourceName)
+			fetchResource(&limit, resourceName+"-limits", namespaceName)
 			Expect(limit.Spec.Limits[0].Default[corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 
 			By("Updating Spec to remove constraints")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.ResourceQuota = nil
 			workspace.Spec.LimitRange = nil
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
@@ -184,7 +187,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Network Isolation", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
 				ws.Spec.NetworkIsolation = tenantv1alpha1.WorkspaceNetworkIsolation{
 					Enabled:           true,
 					AllowedNamespaces: []string{"kube-system"},
@@ -197,11 +200,11 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying NetworkPolicy creation")
 			var netpol networkingv1.NetworkPolicy
-			fetchResource(&netpol, resourceName+"-network-isolation", resourceName)
+			fetchResource(&netpol, resourceName+"-network-isolation", namespaceName)
 			Expect(netpol.Spec.Ingress).NotTo(BeEmpty())
 
 			By("Disabling NetworkIsolation")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.NetworkIsolation.Enabled = false
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
@@ -214,7 +217,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("RBAC & Multi-User Support", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
 				ws.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 					{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: viewUser},
@@ -227,11 +230,11 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Checking View RoleBinding")
 			var viewBinding rbacv1.RoleBinding
-			fetchResource(&viewBinding, resourceName+"-binding-view", resourceName)
+			fetchResource(&viewBinding, resourceName+"-binding-view", namespaceName)
 			Expect(viewBinding.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(viewUser))))
 
 			By("Removing View User")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 			}
@@ -257,14 +260,14 @@ var _ = Describe("Workspace Controller", func() {
 			By("Allowing admin update")
 			adminClient := createImpersonatedClient(adminUser)
 			var latestWs tenantv1alpha1.Workspace
-			Expect(k8sClient.Get(ctx, nsName, &latestWs)).To(Succeed())
+			fetchResource(&latestWs, resourceName, namespaceName)
 
 			latestWs.Spec.NetworkIsolation.Enabled = true
 			Expect(adminClient.Update(ctx, &latestWs)).To(Succeed())
 
 			By("Denying non-admin update")
 			viewClient := createImpersonatedClient(viewUser)
-			Expect(k8sClient.Get(ctx, nsName, &latestWs)).To(Succeed()) // Refresh
+			fetchResource(&latestWs, resourceName, namespaceName) // Refresh
 
 			latestWs.Spec.NetworkIsolation.Enabled = false
 			err := viewClient.Update(ctx, &latestWs)
@@ -275,7 +278,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("User Label Synchronization", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
 				ws.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 					{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: viewUser},
@@ -285,7 +288,7 @@ var _ = Describe("Workspace Controller", func() {
 
 		It("should mirror user subjects as labels and preserve custom labels", func() {
 			By("Adding a custom label to the workspace before reconciliation")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			if workspace.Labels == nil {
 				workspace.Labels = make(map[string]string)
 			}
@@ -295,7 +298,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Fetching the reconciled Workspace")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 
 			By("Verifying user labels are created")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
@@ -310,7 +313,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Adding a new user")
 			newUser := "editor-user"
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = append(workspace.Spec.Users, tenantv1alpha1.WorkspaceUser{
 				Role:    tenantv1alpha1.WorkspaceUserRoleEdit,
 				Subject: newUser,
@@ -320,7 +323,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying new user label is added")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
@@ -330,7 +333,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Removing the view user")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 			}
@@ -339,7 +342,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying removed user label is gone")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
 			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + viewUser))
 		})
@@ -350,7 +353,7 @@ var _ = Describe("Workspace Controller", func() {
 			By("Replacing all users")
 			newUser1 := "new-admin"
 			newUser2 := "new-editor"
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: newUser1},
 				{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: newUser2},
@@ -360,7 +363,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying labels reflect new users only")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser1, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser2, "true"))
 			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + adminUser))
@@ -370,7 +373,7 @@ var _ = Describe("Workspace Controller", func() {
 		It("should handle users with special characters in their subject", func() {
 			specialUser := "user.example.com"
 			By("Updating workspace with special user")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: specialUser},
 			}
@@ -379,7 +382,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying special character handling")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+specialUser, "true"))
 		})
 
@@ -387,22 +390,26 @@ var _ = Describe("Workspace Controller", func() {
 			fullyReconcile()
 
 			By("Getting the labels after full reconciliation")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			firstLabels := workspace.Labels
 
 			executeReconcile()
 
 			By("Verifying labels are stable after third reconcile")
-			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(Equal(firstLabels))
 		})
 	})
 
 	Context("Internal Helpers", func() {
 		It("should generate correct labels", func() {
-			labels := labelsForWorkspace("demo", "v1", "test")
+			labels := labelsForWorkspace("workspace-name", "v1")
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/name", "workspace"))
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/instance", "demo"))
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/instance", "workspace-name"))
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/version", "v1"))
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/component", "workspace"))
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/part-of", "otterscale"))
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "otterscale-operator"))
 		})
 
 		It("should check ownership correctly", func() {
