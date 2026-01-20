@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package tenant
 
 import (
 	"context"
@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -35,9 +34,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
-
-	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -64,7 +63,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	var err error
-	err = corev1alpha1.AddToScheme(scheme.Scheme)
+	err = tenantv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	err = admissionregistrationv1.AddToScheme(scheme.Scheme)
@@ -96,8 +95,8 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient).NotTo(BeNil())
 
 	applyManifests(filepath.Join("..", "..", "..", "config", "admission"))
-	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "workspace_editor_role.yaml"))
-	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "workspace_system_authenticated_binding.yaml"))
+	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "tenant_workspace_editor_role.yaml"))
+	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "tenant_workspace_binding.yaml"))
 })
 
 var _ = AfterSuite(func() {

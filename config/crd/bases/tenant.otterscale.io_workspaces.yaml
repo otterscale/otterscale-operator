@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.0
-  name: workspaces.core.otterscale.io
+  name: workspaces.tenant.otterscale.io
 spec:
-  group: core.otterscale.io
+  group: tenant.otterscale.io
   names:
     kind: Workspace
     listKind: WorkspaceList

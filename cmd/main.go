@@ -37,8 +37,8 @@ import (
 
 	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 
-	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
-	corecontroller "github.com/otterscale/otterscale-operator/internal/controller/core"
+	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	tenantcontroller "github.com/otterscale/otterscale-operator/internal/controller/tenant"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -50,10 +50,8 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(corev1alpha1.AddToScheme(scheme))
-
 	utilruntime.Must(istioapisecurityv1.AddToScheme(scheme))
+	utilruntime.Must(tenantv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -183,7 +181,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&corecontroller.WorkspaceReconciler{
+	if err := (&tenantcontroller.WorkspaceReconciler{
 		Client:  mgr.GetClient(),
 		Scheme:  mgr.GetScheme(),
 		Version: version,

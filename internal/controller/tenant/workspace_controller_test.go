@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package tenant
 
 import (
 	"context"
@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
+	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 )
 
 var _ = Describe("Workspace Controller", func() {
@@ -49,19 +49,19 @@ var _ = Describe("Workspace Controller", func() {
 	var (
 		ctx          context.Context
 		reconciler   *WorkspaceReconciler
-		workspace    *corev1alpha1.Workspace
+		workspace    *tenantv1alpha1.Workspace
 		nsName       types.NamespacedName
 		resourceName string
 	)
 
 	// --- Helpers ---
 
-	makeWorkspace := func(name string, mods ...func(*corev1alpha1.Workspace)) *corev1alpha1.Workspace {
-		ws := &corev1alpha1.Workspace{
+	makeWorkspace := func(name string, mods ...func(*tenantv1alpha1.Workspace)) *tenantv1alpha1.Workspace {
+		ws := &tenantv1alpha1.Workspace{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
-			Spec: corev1alpha1.WorkspaceSpec{
-				Users: []corev1alpha1.WorkspaceUser{
-					{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+			Spec: tenantv1alpha1.WorkspaceSpec{
+				Users: []tenantv1alpha1.WorkspaceUser{
+					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 				},
 			},
 		}
@@ -143,7 +143,7 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Resource Management", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *corev1alpha1.Workspace) {
+			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
 				ws.Spec.ResourceQuota = &corev1.ResourceQuotaSpec{
 					Hard: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")},
 				}
@@ -184,8 +184,8 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Network Isolation", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *corev1alpha1.Workspace) {
-				ws.Spec.NetworkIsolation = corev1alpha1.WorkspaceNetworkIsolation{
+			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+				ws.Spec.NetworkIsolation = tenantv1alpha1.WorkspaceNetworkIsolation{
 					Enabled:           true,
 					AllowedNamespaces: []string{"kube-system"},
 				}
@@ -214,10 +214,10 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("RBAC & Multi-User Support", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *corev1alpha1.Workspace) {
-				ws.Spec.Users = []corev1alpha1.WorkspaceUser{
-					{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
-					{Role: corev1alpha1.WorkspaceUserRoleView, Subject: viewUser},
+			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+				ws.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+					{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: viewUser},
 				}
 			})
 		})
@@ -232,8 +232,8 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Removing View User")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
-				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
@@ -256,7 +256,7 @@ var _ = Describe("Workspace Controller", func() {
 		It("should enforce admin-only modifications", func() {
 			By("Allowing admin update")
 			adminClient := createImpersonatedClient(adminUser)
-			var latestWs corev1alpha1.Workspace
+			var latestWs tenantv1alpha1.Workspace
 			Expect(k8sClient.Get(ctx, nsName, &latestWs)).To(Succeed())
 
 			latestWs.Spec.NetworkIsolation.Enabled = true
@@ -275,10 +275,10 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("User Label Synchronization", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, func(ws *corev1alpha1.Workspace) {
-				ws.Spec.Users = []corev1alpha1.WorkspaceUser{
-					{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
-					{Role: corev1alpha1.WorkspaceUserRoleView, Subject: viewUser},
+			workspace = makeWorkspace(resourceName, func(ws *tenantv1alpha1.Workspace) {
+				ws.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+					{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: viewUser},
 				}
 			})
 		})
@@ -311,8 +311,8 @@ var _ = Describe("Workspace Controller", func() {
 			By("Adding a new user")
 			newUser := "editor-user"
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			workspace.Spec.Users = append(workspace.Spec.Users, corev1alpha1.WorkspaceUser{
-				Role:    corev1alpha1.WorkspaceUserRoleEdit,
+			workspace.Spec.Users = append(workspace.Spec.Users, tenantv1alpha1.WorkspaceUser{
+				Role:    tenantv1alpha1.WorkspaceUserRoleEdit,
 				Subject: newUser,
 			})
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
@@ -331,8 +331,8 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Removing the view user")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
-				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
@@ -351,9 +351,9 @@ var _ = Describe("Workspace Controller", func() {
 			newUser1 := "new-admin"
 			newUser2 := "new-editor"
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
-				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: newUser1},
-				{Role: corev1alpha1.WorkspaceUserRoleEdit, Subject: newUser2},
+			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: newUser1},
+				{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: newUser2},
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
@@ -371,8 +371,8 @@ var _ = Describe("Workspace Controller", func() {
 			specialUser := "user.example.com"
 			By("Updating workspace with special user")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
-				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: specialUser},
+			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: specialUser},
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 

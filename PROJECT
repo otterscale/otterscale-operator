@@ -6,6 +6,7 @@ cliVersion: 4.10.1
 domain: otterscale.io
 layout:
 - go.kubebuilder.io/v4
+multigroup: true
 projectName: otterscale-operator
 repo: github.com/otterscale/otterscale-operator
 resources:
@@ -13,8 +14,8 @@ resources:
     crdVersion: v1
   controller: true
   domain: otterscale.io
-  group: core
+  group: tenant
   kind: Workspace
-  path: github.com/otterscale/otterscale-operator/api/core/v1alpha1
+  path: github.com/otterscale/otterscale-operator/api/tenant/v1alpha1
   version: v1alpha1
 version: "3"
