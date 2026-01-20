@@ -25,6 +25,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -62,6 +66,12 @@ var _ = BeforeSuite(func() {
 	err = tenantv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = admissionregistrationv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = istioapisecurityv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
@@ -83,6 +93,10 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	applyManifests(filepath.Join("..", "..", "..", "config", "admission"))
+	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "tenant_workspace_editor_role.yaml"))
+	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "tenant_workspace_binding.yaml"))
 })
 
 var _ = AfterSuite(func() {
@@ -113,4 +127,43 @@ func getFirstFoundEnvTestBinaryDir() string {
 		}
 	}
 	return ""
+}
+
+func applyManifests(dir string) {
+	files, err := os.ReadDir(dir)
+	Expect(err).NotTo(HaveOccurred())
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".yaml" || f.Name() == "kustomization.yaml" {
+			continue
+		}
+		applyManifest(filepath.Join(dir, f.Name()))
+	}
+}
+
+func applyManifest(path string) {
+	file, err := os.Open(path)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() {
+		Expect(file.Close()).To(Succeed())
+	}()
+
+	decoder := yaml.NewYAMLOrJSONDecoder(file, 4096)
+	for {
+		obj := &unstructured.Unstructured{}
+		if err := decoder.Decode(&obj.Object); err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		if obj.Object == nil {
+			continue
+		}
+
+		if err := k8sClient.Create(ctx, obj); err != nil {
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
 }

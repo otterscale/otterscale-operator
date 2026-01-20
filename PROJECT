@@ -12,7 +12,6 @@ repo: github.com/otterscale/otterscale-operator
 resources:
 - api:
     crdVersion: v1
-    namespaced: true
   controller: true
   domain: otterscale.io
   group: tenant

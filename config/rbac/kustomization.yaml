@@ -25,5 +25,4 @@ resources:
 - tenant_workspace_admin_role.yaml
 - tenant_workspace_editor_role.yaml
 - tenant_workspace_viewer_role.yaml
-- workspace_system_authenticated_binding.yaml
-
+- tenant_workspace_binding.yaml
