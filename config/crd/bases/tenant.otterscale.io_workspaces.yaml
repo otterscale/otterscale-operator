@@ -132,6 +132,9 @@ spec:
                 minLength: 1
                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$
                 type: string
+                x-kubernetes-validations:
+                - message: namespace is immutable
+                  rule: self == oldSelf
               networkIsolation:
                 description: NetworkIsolation defines the ingress traffic rules for
                   the workspace.

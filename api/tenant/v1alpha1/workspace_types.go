@@ -81,8 +81,7 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Immutable
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable"
 	// +required
 	Namespace string `json:"namespace"`
 
@@ -90,7 +89,6 @@ type WorkspaceSpec struct {
 	// +listType=map
 	// +listMapKey=subject
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:Required
 	// +required
 	Users []WorkspaceUser `json:"users,omitempty"`
 
