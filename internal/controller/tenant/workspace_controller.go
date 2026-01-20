@@ -205,17 +205,16 @@ func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *tenant
 
 // reconcileNamespace ensures the Namespace exists and is properly labeled.
 func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Spec.Namespace
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: w.Spec.Namespace,
 		},
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, namespace, func() error {
 		// Safety check: Prevent taking over existing namespaces not owned by us
 		if !isOwned(namespace.OwnerReferences, w.UID) && !namespace.CreationTimestamp.IsZero() {
-			return fmt.Errorf("namespace %s exists but is not owned by this workspace", name)
+			return fmt.Errorf("namespace %s exists but is not owned by this workspace", namespace.Name)
 		}
 
 		if namespace.Labels == nil {
@@ -236,7 +235,7 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("Namespace reconciled", "operation", op, "name", name)
+		log.FromContext(ctx).Info("Namespace reconciled", "operation", op, "name", namespace.Name)
 	}
 	return nil
 }
@@ -301,7 +300,7 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenan
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("RoleBinding reconciled", "operation", op, "name", workspaceRoleBindingName)
+		log.FromContext(ctx).Info("RoleBinding reconciled", "operation", op, "name", binding.Name)
 	}
 	return nil
 }
@@ -328,7 +327,7 @@ func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *ten
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("ResourceQuota reconciled", "operation", op, "name", workspaceResourceQuotaName)
+		log.FromContext(ctx).Info("ResourceQuota reconciled", "operation", op, "name", quota.Name)
 	}
 	return nil
 }
@@ -355,7 +354,7 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenant
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("LimitRange reconciled", "operation", op, "name", workspaceLimitRangeName)
+		log.FromContext(ctx).Info("LimitRange reconciled", "operation", op, "name", limits.Name)
 	}
 	return nil
 }
@@ -426,7 +425,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *ten
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("NetworkPolicy reconciled", "operation", op, "name", workspaceNetworkPolicyName)
+		log.FromContext(ctx).Info("NetworkPolicy reconciled", "operation", op, "name", policy.Name)
 	}
 	return nil
 }
@@ -458,7 +457,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", workspacePeerAuthenticationName)
+		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", peer.Name)
 	}
 	return nil
 }
@@ -505,7 +504,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("AuthorizationPolicy reconciled", "operation", op, "name", workspaceAuthorizationPolicyName)
+		log.FromContext(ctx).Info("AuthorizationPolicy reconciled", "operation", op, "name", policy.Name)
 	}
 	return nil
 }
