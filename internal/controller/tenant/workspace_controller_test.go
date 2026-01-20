@@ -131,7 +131,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying the Admin RoleBinding")
 			var rb rbacv1.RoleBinding
-			fetchResource(&rb, resourceName+"-binding-admin", namespaceName)
+			fetchResource(&rb, workspaceRoleBindingName+"-admin", namespaceName)
 			Expect(rb.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(adminUser))))
 
 			By("Verifying status updates")
@@ -164,11 +164,11 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying creation")
 			var quota corev1.ResourceQuota
-			fetchResource(&quota, resourceName+"-quota", namespaceName)
+			fetchResource(&quota, workspaceResourceQuotaName, namespaceName)
 			Expect(quota.Spec.Hard[corev1.ResourcePods]).To(Equal(resource.MustParse("10")))
 
 			var limit corev1.LimitRange
-			fetchResource(&limit, resourceName+"-limits", namespaceName)
+			fetchResource(&limit, workspaceLimitRangeName, namespaceName)
 			Expect(limit.Spec.Limits[0].Default[corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 
 			By("Updating Spec to remove constraints")
@@ -200,7 +200,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying NetworkPolicy creation")
 			var netpol networkingv1.NetworkPolicy
-			fetchResource(&netpol, resourceName+"-network-isolation", namespaceName)
+			fetchResource(&netpol, workspaceNetworkPolicyName, namespaceName)
 			Expect(netpol.Spec.Ingress).NotTo(BeEmpty())
 
 			By("Disabling NetworkIsolation")
@@ -230,7 +230,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Checking View RoleBinding")
 			var viewBinding rbacv1.RoleBinding
-			fetchResource(&viewBinding, resourceName+"-binding-view", namespaceName)
+			fetchResource(&viewBinding, workspaceRoleBindingName+"-view", namespaceName)
 			Expect(viewBinding.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(viewUser))))
 
 			By("Removing View User")
