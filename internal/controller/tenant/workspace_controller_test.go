@@ -403,7 +403,9 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Internal Helpers", func() {
 		It("should generate correct labels", func() {
-			labels := labelsForWorkspace("v1")
+			labels := labelsForWorkspace("workspace-name", "v1")
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/name", "workspace"))
+			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/instance", "workspace-name"))
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/version", "v1"))
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/component", "workspace"))
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/part-of", "otterscale"))

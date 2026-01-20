@@ -213,7 +213,7 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv
 			namespace.Labels = map[string]string{}
 		}
 
-		maps.Copy(namespace.Labels, r.labelsForWorkspace(w.Name))
+		maps.Copy(namespace.Labels, labelsForWorkspace(w.Name, r.Version))
 
 		// Enable Istio sidecar injection if Istio is detected
 		if r.istioEnabled {
@@ -273,7 +273,7 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenan
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-		binding.Labels = r.labelsForWorkspace(w.Name)
+		binding.Labels = labelsForWorkspace(w.Name, r.Version)
 		binding.Subjects = []rbacv1.Subject{}
 		for _, u := range users {
 			binding.Subjects = append(binding.Subjects, rbacv1.Subject{
@@ -313,7 +313,7 @@ func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *ten
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, quota, func() error {
-		quota.Labels = r.labelsForWorkspace(w.Name)
+		quota.Labels = labelsForWorkspace(w.Name, r.Version)
 		quota.Spec = *w.Spec.ResourceQuota
 		return ctrlutil.SetControllerReference(w, quota, r.Scheme)
 	})
@@ -341,7 +341,7 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenant
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, limits, func() error {
-		limits.Labels = r.labelsForWorkspace(w.Name)
+		limits.Labels = labelsForWorkspace(w.Name, r.Version)
 		limits.Spec = *w.Spec.LimitRange
 		return ctrlutil.SetControllerReference(w, limits, r.Scheme)
 	})
@@ -380,7 +380,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
-		peer.Labels = r.labelsForWorkspace(w.Name)
+		peer.Labels = labelsForWorkspace(w.Name, r.Version)
 		peer.Spec = istiosecurityv1.PeerAuthentication{
 			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
 			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
@@ -413,7 +413,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = r.labelsForWorkspace(w.Name)
+		policy.Labels = labelsForWorkspace(w.Name, r.Version)
 
 		allowedNamespaces := []string{w.Spec.Namespace} // Always allow traffic within the workspace
 		allowedNamespaces = append(allowedNamespaces, w.Spec.NetworkIsolation.AllowedNamespaces...)
@@ -461,7 +461,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *ten
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = r.labelsForWorkspace(w.Name)
+		policy.Labels = labelsForWorkspace(w.Name, r.Version)
 
 		// Rule 1: Allow traffic from within the same namespace
 		ingressRules := []networkingv1.NetworkPolicyIngressRule{
@@ -612,11 +612,11 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 }
 
 // labelsForWorkspace returns a standard set of labels for resources managed by this operator.
-func (r *WorkspaceReconciler) labelsForWorkspace(workspace string) map[string]string {
+func labelsForWorkspace(workspace, version string) map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       "workspace",
 		"app.kubernetes.io/instance":   workspace,
-		"app.kubernetes.io/version":    r.Version,
+		"app.kubernetes.io/version":    version,
 		"app.kubernetes.io/component":  "workspace",
 		"app.kubernetes.io/part-of":    "otterscale",
 		"app.kubernetes.io/managed-by": "otterscale-operator",
