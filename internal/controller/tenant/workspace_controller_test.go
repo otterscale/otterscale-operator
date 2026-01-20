@@ -135,7 +135,7 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(rb.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(adminUser))))
 
 			By("Verifying status updates")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Status.NamespaceRef.Name).To(Equal(namespaceName))
 
 			readyCond := meta.FindStatusCondition(workspace.Status.Conditions, "Ready")
@@ -172,7 +172,7 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(limit.Spec.Limits[0].Default[corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 
 			By("Updating Spec to remove constraints")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.ResourceQuota = nil
 			workspace.Spec.LimitRange = nil
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
@@ -204,7 +204,7 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(netpol.Spec.Ingress).NotTo(BeEmpty())
 
 			By("Disabling NetworkIsolation")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.NetworkIsolation.Enabled = false
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
@@ -234,7 +234,7 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(viewBinding.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(viewUser))))
 
 			By("Removing View User")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 			}
@@ -288,7 +288,7 @@ var _ = Describe("Workspace Controller", func() {
 
 		It("should mirror user subjects as labels and preserve custom labels", func() {
 			By("Adding a custom label to the workspace before reconciliation")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			if workspace.Labels == nil {
 				workspace.Labels = make(map[string]string)
 			}
@@ -298,7 +298,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Fetching the reconciled Workspace")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 
 			By("Verifying user labels are created")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
@@ -313,7 +313,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Adding a new user")
 			newUser := "editor-user"
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = append(workspace.Spec.Users, tenantv1alpha1.WorkspaceUser{
 				Role:    tenantv1alpha1.WorkspaceUserRoleEdit,
 				Subject: newUser,
@@ -323,7 +323,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying new user label is added")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
@@ -333,7 +333,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Removing the view user")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
 			}
@@ -342,7 +342,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying removed user label is gone")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
 			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + viewUser))
 		})
@@ -353,7 +353,7 @@ var _ = Describe("Workspace Controller", func() {
 			By("Replacing all users")
 			newUser1 := "new-admin"
 			newUser2 := "new-editor"
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: newUser1},
 				{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: newUser2},
@@ -363,7 +363,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying labels reflect new users only")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser1, "true"))
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser2, "true"))
 			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + adminUser))
@@ -373,7 +373,7 @@ var _ = Describe("Workspace Controller", func() {
 		It("should handle users with special characters in their subject", func() {
 			specialUser := "user.example.com"
 			By("Updating workspace with special user")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
 				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: specialUser},
 			}
@@ -382,7 +382,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying special character handling")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+specialUser, "true"))
 		})
 
@@ -390,13 +390,13 @@ var _ = Describe("Workspace Controller", func() {
 			fullyReconcile()
 
 			By("Getting the labels after full reconciliation")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			firstLabels := workspace.Labels
 
 			executeReconcile()
 
 			By("Verifying labels are stable after third reconcile")
-			fetchResource(workspace, resourceName, namespaceName)
+			fetchResource(workspace, resourceName, "")
 			Expect(workspace.Labels).To(Equal(firstLabels))
 		})
 	})

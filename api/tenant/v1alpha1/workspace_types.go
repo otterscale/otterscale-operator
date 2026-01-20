@@ -84,7 +84,7 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Immutable
 	// +required
-	Namespace string `json:"namespace,omitempty"`
+	Namespace string `json:"namespace"`
 
 	// Users is the list of users granted access to this workspace.
 	// +listType=map
