@@ -514,7 +514,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	newStatus := w.Status.DeepCopy()
 
 	// Update Namespace reference
-	newStatus.Namespace = &corev1.ObjectReference{
+	newStatus.NamespaceRef = &corev1.ObjectReference{
 		APIVersion: corev1.SchemeGroupVersion.String(),
 		Kind:       "Namespace",
 		Name:       w.Name,
@@ -526,9 +526,9 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 		rolesInUse[u.Role] = true
 	}
 
-	newStatus.RoleBindings = []corev1.ObjectReference{}
+	newStatus.RoleBindingRefs = []corev1.ObjectReference{}
 	for role := range rolesInUse {
-		newStatus.RoleBindings = append(newStatus.RoleBindings, corev1.ObjectReference{
+		newStatus.RoleBindingRefs = append(newStatus.RoleBindingRefs, corev1.ObjectReference{
 			APIVersion: rbacv1.SchemeGroupVersion.String(),
 			Kind:       "RoleBinding",
 			Name:       w.Name + "-binding-" + string(role),
@@ -538,48 +538,48 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 
 	// Update ResourceQuota reference
 	if w.Spec.ResourceQuota != nil {
-		newStatus.ResourceQuota = &corev1.ObjectReference{
+		newStatus.ResourceQuotaRef = &corev1.ObjectReference{
 			APIVersion: corev1.SchemeGroupVersion.String(),
 			Kind:       "ResourceQuota",
 			Name:       w.Name + "-quota",
 			Namespace:  w.Name,
 		}
 	} else {
-		newStatus.ResourceQuota = nil
+		newStatus.ResourceQuotaRef = nil
 	}
 
 	// Update LimitRange reference
 	if w.Spec.LimitRange != nil {
-		newStatus.LimitRange = &corev1.ObjectReference{
+		newStatus.LimitRangeRef = &corev1.ObjectReference{
 			APIVersion: corev1.SchemeGroupVersion.String(),
 			Kind:       "LimitRange",
 			Name:       w.Name + "-limits",
 			Namespace:  w.Name,
 		}
 	} else {
-		newStatus.LimitRange = nil
+		newStatus.LimitRangeRef = nil
 	}
 
 	// Update Network Isolation resources
 	if w.Spec.NetworkIsolation.Enabled {
 		if r.istioEnabled {
-			newStatus.PeerAuthentication = &corev1.ObjectReference{
+			newStatus.PeerAuthenticationRef = &corev1.ObjectReference{
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
 				Kind:       "PeerAuthentication",
 				Name:       w.Name + "-strict-mtls",
 				Namespace:  w.Name,
 			}
-			newStatus.AuthorizationPolicy = &corev1.ObjectReference{
+			newStatus.AuthorizationPolicyRef = &corev1.ObjectReference{
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
 				Kind:       "AuthorizationPolicy",
 				Name:       w.Name + "-network-isolation",
 				Namespace:  w.Name,
 			}
-			newStatus.NetworkPolicy = nil
+			newStatus.NetworkPolicyRef = nil
 		} else {
-			newStatus.PeerAuthentication = nil
-			newStatus.AuthorizationPolicy = nil
-			newStatus.NetworkPolicy = &corev1.ObjectReference{
+			newStatus.PeerAuthenticationRef = nil
+			newStatus.AuthorizationPolicyRef = nil
+			newStatus.NetworkPolicyRef = &corev1.ObjectReference{
 				APIVersion: networkingv1.SchemeGroupVersion.String(),
 				Kind:       "NetworkPolicy",
 				Name:       w.Name + "-network-isolation",
@@ -587,9 +587,9 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 			}
 		}
 	} else {
-		newStatus.PeerAuthentication = nil
-		newStatus.AuthorizationPolicy = nil
-		newStatus.NetworkPolicy = nil
+		newStatus.PeerAuthenticationRef = nil
+		newStatus.AuthorizationPolicyRef = nil
+		newStatus.NetworkPolicyRef = nil
 	}
 
 	// Set Ready condition
