@@ -124,6 +124,14 @@ spec:
                 required:
                 - limits
                 type: object
+              namespace:
+                description: |-
+                  Namespace is the name of the Kubernetes Namespace to be created for this workspace.
+                  It must be unique across all Workspaces.
+                maxLength: 63
+                minLength: 1
+                pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$
+                type: string
               networkIsolation:
                 description: NetworkIsolation defines the ingress traffic rules for
                   the workspace.
@@ -246,6 +254,7 @@ spec:
                 - subject
                 x-kubernetes-list-type: map
             required:
+            - namespace
             - users
             type: object
             x-kubernetes-validations:

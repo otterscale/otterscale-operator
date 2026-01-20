@@ -66,6 +66,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
 					Users: []tenantv1alpha1.WorkspaceUser{
 						{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: "view-only-user"},
 						{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
@@ -82,6 +83,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
 					Users: []tenantv1alpha1.WorkspaceUser{
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
 						{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: "view-user"},
@@ -96,6 +98,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
 					Users: []tenantv1alpha1.WorkspaceUser{
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-2"},
@@ -111,6 +114,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
 					Users: []tenantv1alpha1.WorkspaceUser{
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
 					},
@@ -135,6 +139,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
 					Users: []tenantv1alpha1.WorkspaceUser{
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-2"},
@@ -174,6 +179,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
 					Users: []tenantv1alpha1.WorkspaceUser{
 						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
 					},
