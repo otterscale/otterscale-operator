@@ -133,7 +133,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying status updates")
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
-			Expect(workspace.Status.Namespace.Name).To(Equal(resourceName))
+			Expect(workspace.Status.NamespaceRef.Name).To(Equal(resourceName))
 
 			readyCond := meta.FindStatusCondition(workspace.Status.Conditions, "Ready")
 			Expect(readyCond).NotTo(BeNil())

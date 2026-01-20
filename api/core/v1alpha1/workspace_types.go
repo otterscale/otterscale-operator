@@ -99,34 +99,34 @@ type WorkspaceSpec struct {
 // WorkspaceStatus defines the observed state of the Workspace.
 // It contains references to the actual Kubernetes resources created by the operator.
 type WorkspaceStatus struct {
-	// Namespace is a reference to the corev1.Namespace managed by this Workspace.
+	// NamespaceRef is a reference to the corev1.Namespace managed by this Workspace.
 	// +optional
-	Namespace *corev1.ObjectReference `json:"namespace,omitempty"`
+	NamespaceRef *corev1.ObjectReference `json:"namespaceRef,omitempty"`
 
-	// ResourceQuota is a reference to the corev1.ResourceQuota managed by this Workspace.
+	// ResourceQuotaRef is a reference to the corev1.ResourceQuota managed by this Workspace.
 	// +optional
-	ResourceQuota *corev1.ObjectReference `json:"resourceQuota,omitempty"`
+	ResourceQuotaRef *corev1.ObjectReference `json:"resourceQuotaRef,omitempty"`
 
-	// LimitRange is a reference to the corev1.LimitRange managed by this Workspace.
+	// LimitRangeRef is a reference to the corev1.LimitRange managed by this Workspace.
 	// +optional
-	LimitRange *corev1.ObjectReference `json:"limitRange,omitempty"`
+	LimitRangeRef *corev1.ObjectReference `json:"limitRangeRef,omitempty"`
 
-	// RoleBindings contains references to all RBAC RoleBindings created for the workspace users.
+	// RoleBindingRefs contains references to all RBAC RoleBindings created for the workspace users.
 	// +listType=atomic
 	// +optional
-	RoleBindings []corev1.ObjectReference `json:"roleBindings,omitempty"`
+	RoleBindingRefs []corev1.ObjectReference `json:"roleBindingRefs,omitempty"`
 
-	// PeerAuthentication is a reference to the Istio PeerAuthentication resource for mTLS settings.
+	// PeerAuthenticationRef is a reference to the Istio PeerAuthentication resource for mTLS settings.
 	// +optional
-	PeerAuthentication *corev1.ObjectReference `json:"peerAuthentication,omitempty"`
+	PeerAuthenticationRef *corev1.ObjectReference `json:"peerAuthenticationRef,omitempty"`
 
-	// AuthorizationPolicy is a reference to the Istio AuthorizationPolicy enforcing network isolation.
+	// AuthorizationPolicyRef is a reference to the Istio AuthorizationPolicy enforcing network isolation.
 	// +optional
-	AuthorizationPolicy *corev1.ObjectReference `json:"authorizationPolicy,omitempty"`
+	AuthorizationPolicyRef *corev1.ObjectReference `json:"authorizationPolicyRef,omitempty"`
 
-	// NetworkPolicy is a reference to the corev1.NetworkPolicy enforcing network isolation.
+	// NetworkPolicyRef is a reference to the corev1.NetworkPolicy enforcing network isolation.
 	// +optional
-	NetworkPolicy *corev1.ObjectReference `json:"networkPolicy,omitempty"`
+	NetworkPolicyRef *corev1.ObjectReference `json:"networkPolicyRef,omitempty"`
 
 	// Conditions store the status conditions of the Workspace (e.g., Ready, Failed).
 	// +listType=map
