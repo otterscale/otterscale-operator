@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- core_v1alpha1_workspace.yaml
+- tenant_v1alpha1_workspace.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

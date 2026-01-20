@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package tenant
 
 import (
 	"context"
@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -42,7 +41,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/otterscale/otterscale-operator/api/core/v1alpha1"
+	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 )
 
 const UserLabelPrefix = "user.otterscale.io/"
@@ -59,9 +58,9 @@ type WorkspaceReconciler struct {
 }
 
 // RBAC Permissions required by the controller:
-// +kubebuilder:rbac:groups=core.otterscale.io,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=core.otterscale.io,resources=workspaces/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=core.otterscale.io,resources=workspaces/finalizers,verbs=update
+// +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -76,7 +75,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	ctx = log.IntoContext(ctx, logger)
 
 	// Fetch the Workspace instance
-	var w v1alpha1.Workspace
+	var w tenantv1alpha1.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &w); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -133,7 +132,7 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 	}
 
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.Workspace{}).
+		For(&tenantv1alpha1.Workspace{}).
 		// Watch for changes in owned resources to trigger reconciliation
 		Owns(&corev1.Namespace{}).
 		Owns(&corev1.ResourceQuota{}).
@@ -159,7 +158,7 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 }
 
 // reconcileUserLabels ensures that the Workspace has labels for each user in its spec.
-func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *v1alpha1.Workspace) (bool, error) {
+func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *tenantv1alpha1.Workspace) (bool, error) {
 	newLabels := maps.Clone(w.GetLabels())
 	if newLabels == nil {
 		newLabels = make(map[string]string)
@@ -196,7 +195,7 @@ func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *v1alph
 }
 
 // reconcileNamespace ensures the Namespace exists and is properly labeled.
-func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	name := w.Name
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -234,19 +233,19 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *v1alpha
 }
 
 // reconcileRoleBindings groups users by role and creates the necessary bindings.
-func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	// Map roles to lists of users for efficient processing
-	usersByRole := make(map[v1alpha1.WorkspaceUserRole][]v1alpha1.WorkspaceUser)
+	usersByRole := make(map[tenantv1alpha1.WorkspaceUserRole][]tenantv1alpha1.WorkspaceUser)
 
 	for _, user := range w.Spec.Users {
 		usersByRole[user.Role] = append(usersByRole[user.Role], user)
 	}
 
 	// Reconcile bindings for each known role
-	roles := []v1alpha1.WorkspaceUserRole{
-		v1alpha1.WorkspaceUserRoleAdmin,
-		v1alpha1.WorkspaceUserRoleEdit,
-		v1alpha1.WorkspaceUserRoleView,
+	roles := []tenantv1alpha1.WorkspaceUserRole{
+		tenantv1alpha1.WorkspaceUserRoleAdmin,
+		tenantv1alpha1.WorkspaceUserRoleEdit,
+		tenantv1alpha1.WorkspaceUserRoleView,
 	}
 
 	for _, role := range roles {
@@ -259,7 +258,7 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, w *v1al
 
 // reconcileRoleBinding manages the binding between a Role and a list of Users.
 // It deletes the binding if there are no users for that role.
-func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *v1alpha1.Workspace, ur v1alpha1.WorkspaceUserRole, users []v1alpha1.WorkspaceUser) error {
+func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenantv1alpha1.Workspace, ur tenantv1alpha1.WorkspaceUserRole, users []tenantv1alpha1.WorkspaceUser) error {
 	name := w.Name + "-binding-" + string(ur)
 	binding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
@@ -300,7 +299,7 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *v1alp
 }
 
 // reconcileResourceQuota applies quota constraints if defined.
-func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	name := w.Name + "-quota"
 	quota := &corev1.ResourceQuota{
 		ObjectMeta: metav1.ObjectMeta{
@@ -328,7 +327,7 @@ func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *v1a
 }
 
 // reconcileLimitRange applies default limits if defined.
-func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	name := w.Name + "-limits"
 	limits := &corev1.LimitRange{
 		ObjectMeta: metav1.ObjectMeta{
@@ -356,7 +355,7 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *v1alph
 }
 
 // reconcileNetworkIsolation decides whether to use Istio or standard NetworkPolicy.
-func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	if err := r.reconcilePeerAuthentication(ctx, w); err != nil {
 		return err
 	}
@@ -367,7 +366,7 @@ func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *
 }
 
 // reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
-func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	name := w.Name + "-strict-mtls"
 	peer := &istioapisecurityv1.PeerAuthentication{
 		ObjectMeta: metav1.ObjectMeta{
@@ -400,7 +399,7 @@ func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w
 }
 
 // reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
-func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	name := w.Name + "-network-isolation"
 	policy := &istioapisecurityv1.AuthorizationPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -448,7 +447,7 @@ func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, 
 }
 
 // reconcileNetworkPolicy creates K8s NetworkPolicies for environments without Istio.
-func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	name := w.Name + "-network-isolation"
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -509,7 +508,7 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *v1a
 }
 
 // updateStatus calculates the status based on the current state and updates the resource.
-func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Workspace) error {
+func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha1.Workspace) error {
 	// Deep copy to avoid mutating the fetched object
 	newStatus := w.Status.DeepCopy()
 
@@ -521,7 +520,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	}
 
 	// Update RoleBindings references
-	rolesInUse := map[v1alpha1.WorkspaceUserRole]bool{}
+	rolesInUse := map[tenantv1alpha1.WorkspaceUserRole]bool{}
 	for _, u := range w.Spec.Users {
 		rolesInUse[u.Role] = true
 	}
@@ -610,15 +609,6 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *v1alpha1.Work
 	}
 
 	return nil
-}
-
-// checkIstioEnabled checks if Istio is installed in the cluster.
-func checkIstioEnabled(c *rest.Config) (bool, error) {
-	dc, err := discovery.NewDiscoveryClientForConfig(c)
-	if err != nil {
-		return false, err
-	}
-	return isResourceSupported(dc, "networking.istio.io/v1beta1"), nil
 }
 
 // isResourceSupported checks if CRD exist in the cluster.

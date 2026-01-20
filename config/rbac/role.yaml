@@ -27,32 +27,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - core.otterscale.io
-  resources:
-  - workspaces/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies
@@ -100,3 +74,29 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - tenant.otterscale.io
+  resources:
+  - workspaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - tenant.otterscale.io
+  resources:
+  - workspaces/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - tenant.otterscale.io
+  resources:
+  - workspaces/status
+  verbs:
+  - get
+  - patch
+  - update

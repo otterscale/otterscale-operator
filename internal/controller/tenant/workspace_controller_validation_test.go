@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package tenant
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	corev1alpha1 "github.com/otterscale/otterscale-operator/api/core/v1alpha1"
+	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 )
 
 var _ = Describe("Workspace Controller - CEL Validation", func() {
@@ -40,7 +40,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 
 	var (
 		ctx          context.Context
-		workspace    *corev1alpha1.Workspace
+		workspace    *tenantv1alpha1.Workspace
 		resourceName string
 	)
 
@@ -63,12 +63,12 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 
 	Context("Admin User Validation", func() {
 		It("should reject workspace creation without any admin user", func() {
-			workspace = &corev1alpha1.Workspace{
+			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: corev1alpha1.WorkspaceSpec{
-					Users: []corev1alpha1.WorkspaceUser{
-						{Role: corev1alpha1.WorkspaceUserRoleView, Subject: "view-only-user"},
-						{Role: corev1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: "view-only-user"},
+						{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
 					},
 				},
 			}
@@ -79,12 +79,12 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 		})
 
 		It("should accept workspace creation with at least one admin user", func() {
-			workspace = &corev1alpha1.Workspace{
+			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: corev1alpha1.WorkspaceSpec{
-					Users: []corev1alpha1.WorkspaceUser{
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
-						{Role: corev1alpha1.WorkspaceUserRoleView, Subject: "view-user"},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
+						{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: "view-user"},
 					},
 				},
 			}
@@ -93,13 +93,13 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 		})
 
 		It("should accept workspace with multiple admin users", func() {
-			workspace = &corev1alpha1.Workspace{
+			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: corev1alpha1.WorkspaceSpec{
-					Users: []corev1alpha1.WorkspaceUser{
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-2"},
-						{Role: corev1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-2"},
+						{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
 					},
 				},
 			}
@@ -108,11 +108,11 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 		})
 
 		It("should reject update that removes all admin users", func() {
-			workspace = &corev1alpha1.Workspace{
+			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: corev1alpha1.WorkspaceSpec{
-					Users: []corev1alpha1.WorkspaceUser{
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
 					},
 				},
 			}
@@ -122,8 +122,8 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
 
 			// Try to remove all admin users
-			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
-				{Role: corev1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
+			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+				{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: "edit-user"},
 			}
 
 			err := k8sClient.Update(ctx, workspace)
@@ -132,12 +132,12 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 		})
 
 		It("should allow update that keeps at least one admin user", func() {
-			workspace = &corev1alpha1.Workspace{
+			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: corev1alpha1.WorkspaceSpec{
-					Users: []corev1alpha1.WorkspaceUser{
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-2"},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-2"},
 					},
 				},
 			}
@@ -147,9 +147,9 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			Expect(k8sClient.Get(ctx, nsName, workspace)).To(Succeed())
 
 			// Remove one admin but keep another
-			workspace.Spec.Users = []corev1alpha1.WorkspaceUser{
-				{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
-				{Role: corev1alpha1.WorkspaceUserRoleView, Subject: "view-user"},
+			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
+				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user-1"},
+				{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: "view-user"},
 			}
 
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
@@ -171,11 +171,11 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 		}
 
 		BeforeEach(func() {
-			workspace = &corev1alpha1.Workspace{
+			workspace = &tenantv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: corev1alpha1.WorkspaceSpec{
-					Users: []corev1alpha1.WorkspaceUser{
-						{Role: corev1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
 					},
 				},
 			}
@@ -186,7 +186,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			saClient := createImpersonatedClient(controllerServiceAccount, nil)
 
 			nsName := types.NamespacedName{Name: resourceName}
-			var ws corev1alpha1.Workspace
+			var ws tenantv1alpha1.Workspace
 			Expect(k8sClient.Get(ctx, nsName, &ws)).To(Succeed())
 
 			ws.Spec.NetworkIsolation.Enabled = true
@@ -197,7 +197,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			masterClient := createImpersonatedClient("cluster-admin", []string{"system:masters"})
 
 			nsName := types.NamespacedName{Name: resourceName}
-			var ws corev1alpha1.Workspace
+			var ws tenantv1alpha1.Workspace
 			Expect(k8sClient.Get(ctx, nsName, &ws)).To(Succeed())
 
 			ws.Spec.NetworkIsolation.Enabled = true
@@ -208,7 +208,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			nonAdminClient := createImpersonatedClient("random-user", []string{"system:authenticated"})
 
 			nsName := types.NamespacedName{Name: resourceName}
-			var ws corev1alpha1.Workspace
+			var ws tenantv1alpha1.Workspace
 			Expect(k8sClient.Get(ctx, nsName, &ws)).To(Succeed())
 
 			ws.Spec.NetworkIsolation.Enabled = true
@@ -221,7 +221,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			adminClient := createImpersonatedClient("admin-user", []string{"system:authenticated"})
 
 			nsName := types.NamespacedName{Name: resourceName}
-			var ws corev1alpha1.Workspace
+			var ws tenantv1alpha1.Workspace
 			Expect(k8sClient.Get(ctx, nsName, &ws)).To(Succeed())
 
 			ws.Spec.NetworkIsolation.Enabled = true

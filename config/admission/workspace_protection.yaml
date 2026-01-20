@@ -6,7 +6,7 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
-      - apiGroups: ["core.otterscale.io"]
+      - apiGroups: ["tenant.otterscale.io"]
         apiVersions: ["v1alpha1"]
         operations: ["UPDATE", "DELETE"]
         resources: ["workspaces"]

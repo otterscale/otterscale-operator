@@ -150,3 +150,71 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+# TEMP
+
+實體層: metal, bootstrap
+
+核心層: fleet, compute, storage, network
+
+連線層: link (負責 Tunnel/Agent) ⬅️ 新加入成員
+
+維運層: ops, telemetry, protection
+
+治理層: identity, governance, finops, audit
+
+應用層: hub, workflow, database, inference, training
+
+---
+
+如果您採取 「Edge 為主，Core 為輔」 的策略（即：CRD 存 Edge，Core 只做 Read-Only Dashboard），這在業界稱為 「聯邦唯讀模式 (Federated Observability)」。
+
+---
+
+Core (Hub)：存放 「意圖 (Intent)」 與 「全域設定 (Global Config)」。
+Edge (Agent)：存放 「執行實體 (Runtime)」 與 「本地資源 (Local Resource)」。
+
+| Level  | Group      | Kind                 | Core | Edge |
+| ------ | ---------- | -------------------- | :--: | :--: |
+| 應用層 | inference  | Service, Model       |      |  v   |
+|        | training   | FinetuneJob, Dataset |      |  v   |
+|        | hub        | Release, Chart       |      |  v   |
+|        | database   | Redis, Postgres      |      |  v   |
+|        | workflow   | Pipeline, Task       |      |  v   |
+| 治理層 | identity   | Workspace, User      |      |  v   |
+|        | governance | Policy, Compliance   |      |  v   |
+|        | finops     | Budget, CostReport   |      |  v   |
+|        | audit      | Trail, Log           |      |  v   |
+| 維運層 | telemetry  | Collector, Rule      |      |  v   |
+|        | protection | Backup, Restore      |      |  v   |
+| 核心層 | compute    | VirtualMachine       |      |  v   |
+|        | network    | VPC, IPPool          |      |  v   |
+|        | storage    | BlockPool            |      |  v   |
+| 實體層 | fleet      | Cluster              |  v   |      |
+|        | metal      | Server               |  v   |      |
+|        | link       | Tunnel               |  v   |      |
+|        | bootstrap  | Config, Image        |  v   |      |
+
+---
+
+Level,Group,Kind,Core (Hub),Edge (Agent),設計意圖與備註
+應用層,inference,"Service, Model",,v,AI 推論直接在 Edge GPU 跑，狀態存在 Edge。
+,training,"FinetuneJob, Dataset",,v,訓練任務在 Edge 排程與執行。
+,hub,"Release, Chart",,v,Helm Release 紀錄在 Edge，斷網也能 Rollback。
+,database,"Redis, Postgres",,v,DB 實體與連線資訊都在 Edge。
+,workflow,"Pipeline, Task",,v,類似 Tekton/Argo Workflow，在 Edge 跑。
+治理層,identity,"Workspace, User",,v,Local RBAC。Edge 內部的權限控管。
+,iam (新增),"Account, Tenant",v,,Global Auth。這是登入 Core 後台用的全域帳號。
+,governance,"Policy, Compliance",,v,OPA/Kyverno 規則，由 Edge Enforce。
+,finops,"Budget, CostReport",,v,Edge 計算自己的花費，Core 只負責拉報表。
+,audit,"Trail, Log",,v,操作紀錄產生在 Edge。
+維運層,telemetry,"Collector, Rule",,v,Prometheus/Otel Collector 跑在 Edge。
+,protection,"Backup, Restore",,v,Velero 備份還原在 Edge 執行。
+核心層,compute,VirtualMachine,,v,KubeVirt CRD。Core 透過 Proxy 操作。
+,network,"VPC, IPPool",,v,CNI 設定。Core 透過 Proxy 操作。
+,storage,BlockPool,,v,Ceph/CSI 設定。Core 透過 Proxy 操作。
+實體層,fleet,Cluster,v,,艦隊名冊。紀錄 Edge 的連線資訊與狀態。
+,metal,Server,v,,硬體庫存。管理未分配的裸機伺服器。
+,link,TunnelServer,v,,Core 端的 Tunnel 監聽設定。
+,,TunnelClient,,v,"Edge 端的連線設定 (Token, Endpoint)。"
+,bootstrap,"Config, Image",v,,開機引導。Talos/Cloud-init 設定，只有 Core 知道。

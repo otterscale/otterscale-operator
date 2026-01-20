@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package tenant
 
 import (
 	"context"
 	"errors"
 	"time"
 
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -56,4 +57,13 @@ func (p *IstioPoller) Start(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// checkIstioEnabled checks if Istio is installed in the cluster.
+func checkIstioEnabled(c *rest.Config) (bool, error) {
+	dc, err := discovery.NewDiscoveryClientForConfig(c)
+	if err != nil {
+		return false, err
+	}
+	return isResourceSupported(dc, "networking.istio.io/v1beta1"), nil
 }

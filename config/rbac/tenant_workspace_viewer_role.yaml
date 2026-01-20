@@ -1,7 +1,7 @@
 # This rule is not used by the project otterscale-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to core.otterscale.io resources.
+# Grants read-only access to tenant.otterscale.io resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 
@@ -11,20 +11,19 @@ metadata:
   labels:
     app.kubernetes.io/name: otterscale-operator
     app.kubernetes.io/managed-by: kustomize
-    rbac.authorization.k8s.io/aggregate-to-view: "true"
-  name: workspace-viewer-role
+  name: tenant-workspace-viewer-role
 rules:
-  - apiGroups:
-      - core.otterscale.io
-    resources:
-      - workspaces
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - core.otterscale.io
-    resources:
-      - workspaces/status
-    verbs:
-      - get
+- apiGroups:
+  - tenant.otterscale.io
+  resources:
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - tenant.otterscale.io
+  resources:
+  - workspaces/status
+  verbs:
+  - get
