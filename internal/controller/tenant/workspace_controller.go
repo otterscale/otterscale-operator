@@ -46,6 +46,15 @@ import (
 
 const UserLabelPrefix = "user.otterscale.io/"
 
+const (
+	workspaceRoleBindingName         = "workspace-role-binding"
+	workspaceResourceQuotaName       = "workspace-resource-quota"
+	workspaceLimitRangeName          = "workspace-limit-range"
+	workspaceNetworkPolicyName       = "workspace-network-policy"
+	workspacePeerAuthenticationName  = "workspace-peer-authentication"
+	workspaceAuthorizationPolicyName = "workspace-authorization-policy"
+)
+
 // WorkspaceReconciler reconciles a Workspace object.
 // It ensures that the underlying Namespace, RBAC roles, ResourceQuotas, and NetworkPolicies
 // match the desired state defined in the Workspace CR.
@@ -196,17 +205,16 @@ func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *tenant
 
 // reconcileNamespace ensures the Namespace exists and is properly labeled.
 func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Spec.Namespace
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: w.Spec.Namespace,
 		},
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, namespace, func() error {
 		// Safety check: Prevent taking over existing namespaces not owned by us
 		if !isOwned(namespace.OwnerReferences, w.UID) && !namespace.CreationTimestamp.IsZero() {
-			return fmt.Errorf("namespace %s exists but is not owned by this workspace", name)
+			return fmt.Errorf("namespace %s exists but is not owned by this workspace", namespace.Name)
 		}
 
 		if namespace.Labels == nil {
@@ -227,7 +235,7 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("Namespace reconciled", "operation", op, "name", name)
+		log.FromContext(ctx).Info("Namespace reconciled", "operation", op, "name", namespace.Name)
 	}
 	return nil
 }
@@ -258,11 +266,10 @@ func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, w *tena
 
 // reconcileRoleBinding manages the binding between a Role and a list of Users.
 // It deletes the binding if there are no users for that role.
-func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenantv1alpha1.Workspace, ur tenantv1alpha1.WorkspaceUserRole, users []tenantv1alpha1.WorkspaceUser) error {
-	name := w.Name + "-binding-" + string(ur)
+func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenantv1alpha1.Workspace, role tenantv1alpha1.WorkspaceUserRole, users []tenantv1alpha1.WorkspaceUser) error {
 	binding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      workspaceRoleBindingName + "-" + string(role),
 			Namespace: w.Spec.Namespace,
 		},
 	}
@@ -285,7 +292,7 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenan
 		binding.RoleRef = rbacv1.RoleRef{
 			Kind:     "ClusterRole",
 			APIGroup: rbacv1.GroupName,
-			Name:     string(ur),
+			Name:     string(role),
 		}
 		return ctrlutil.SetControllerReference(w, binding, r.Scheme)
 	})
@@ -293,17 +300,16 @@ func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenan
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("RoleBinding reconciled", "operation", op, "name", name)
+		log.FromContext(ctx).Info("RoleBinding reconciled", "operation", op, "name", binding.Name)
 	}
 	return nil
 }
 
 // reconcileResourceQuota applies quota constraints if defined.
 func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Name + "-quota"
 	quota := &corev1.ResourceQuota{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      workspaceResourceQuotaName,
 			Namespace: w.Spec.Namespace,
 		},
 	}
@@ -321,17 +327,16 @@ func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *ten
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("ResourceQuota reconciled", "operation", op, "name", name)
+		log.FromContext(ctx).Info("ResourceQuota reconciled", "operation", op, "name", quota.Name)
 	}
 	return nil
 }
 
 // reconcileLimitRange applies default limits if defined.
 func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Name + "-limits"
 	limits := &corev1.LimitRange{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      workspaceLimitRangeName,
 			Namespace: w.Spec.Namespace,
 		},
 	}
@@ -349,109 +354,27 @@ func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenant
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("LimitRange reconciled", "operation", op, "name", name)
+		log.FromContext(ctx).Info("LimitRange reconciled", "operation", op, "name", limits.Name)
 	}
 	return nil
 }
 
 // reconcileNetworkIsolation decides whether to use Istio or standard NetworkPolicy.
 func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *tenantv1alpha1.Workspace) error {
+	if err := r.reconcileNetworkPolicy(ctx, w); err != nil {
+		return err
+	}
 	if err := r.reconcilePeerAuthentication(ctx, w); err != nil {
 		return err
 	}
-	if err := r.reconcileAuthorizationPolicy(ctx, w); err != nil {
-		return err
-	}
-	return r.reconcileNetworkPolicy(ctx, w)
-}
-
-// reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
-func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Name + "-strict-mtls"
-	peer := &istioapisecurityv1.PeerAuthentication{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
-		return ignoreNoMatchNotFound(r.Delete(ctx, peer))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
-		peer.Labels = labelsForWorkspace(w.Name, r.Version)
-		peer.Spec = istiosecurityv1.PeerAuthentication{
-			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
-			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
-				Mode: istiosecurityv1.PeerAuthentication_MutualTLS_STRICT,
-			},
-		}
-		return ctrlutil.SetControllerReference(w, peer, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", name)
-	}
-	return nil
-}
-
-// reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
-func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Name + "-network-isolation"
-	policy := &istioapisecurityv1.AuthorizationPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
-		return ignoreNoMatchNotFound(r.Delete(ctx, policy))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = labelsForWorkspace(w.Name, r.Version)
-
-		allowedNamespaces := []string{w.Spec.Namespace} // Always allow traffic within the workspace
-		allowedNamespaces = append(allowedNamespaces, w.Spec.NetworkIsolation.AllowedNamespaces...)
-
-		policy.Spec = istiosecurityv1.AuthorizationPolicy{
-			Selector: &istiotypev1beta1.WorkloadSelector{
-				MatchLabels: map[string]string{}, // Apply to all workloads
-			},
-			Rules: []*istiosecurityv1.Rule{
-				{
-					From: []*istiosecurityv1.Rule_From{
-						{
-							Source: &istiosecurityv1.Source{
-								Namespaces: allowedNamespaces,
-							},
-						},
-					},
-				},
-			},
-			Action: istiosecurityv1.AuthorizationPolicy_ALLOW,
-		}
-		return ctrlutil.SetControllerReference(w, policy, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("AuthorizationPolicy reconciled", "operation", op, "name", name)
-	}
-	return nil
+	return r.reconcileAuthorizationPolicy(ctx, w)
 }
 
 // reconcileNetworkPolicy creates K8s NetworkPolicies for environments without Istio.
 func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	name := w.Name + "-network-isolation"
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      workspaceNetworkPolicyName,
 			Namespace: w.Spec.Namespace,
 		},
 	}
@@ -502,7 +425,86 @@ func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *ten
 		return err
 	}
 	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("NetworkPolicy reconciled", "operation", op, "name", name)
+		log.FromContext(ctx).Info("NetworkPolicy reconciled", "operation", op, "name", policy.Name)
+	}
+	return nil
+}
+
+// reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
+func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *tenantv1alpha1.Workspace) error {
+	peer := &istioapisecurityv1.PeerAuthentication{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      workspacePeerAuthenticationName,
+			Namespace: w.Spec.Namespace,
+		},
+	}
+
+	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
+		return ignoreNoMatchNotFound(r.Delete(ctx, peer))
+	}
+
+	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
+		peer.Labels = labelsForWorkspace(w.Name, r.Version)
+		peer.Spec = istiosecurityv1.PeerAuthentication{
+			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
+			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
+				Mode: istiosecurityv1.PeerAuthentication_MutualTLS_STRICT,
+			},
+		}
+		return ctrlutil.SetControllerReference(w, peer, r.Scheme)
+	})
+	if err != nil {
+		return err
+	}
+	if op != ctrlutil.OperationResultNone {
+		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", peer.Name)
+	}
+	return nil
+}
+
+// reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
+func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
+	policy := &istioapisecurityv1.AuthorizationPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      workspaceAuthorizationPolicyName,
+			Namespace: w.Spec.Namespace,
+		},
+	}
+
+	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
+		return ignoreNoMatchNotFound(r.Delete(ctx, policy))
+	}
+
+	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
+		policy.Labels = labelsForWorkspace(w.Name, r.Version)
+
+		allowedNamespaces := []string{w.Spec.Namespace} // Always allow traffic within the workspace
+		allowedNamespaces = append(allowedNamespaces, w.Spec.NetworkIsolation.AllowedNamespaces...)
+
+		policy.Spec = istiosecurityv1.AuthorizationPolicy{
+			Selector: &istiotypev1beta1.WorkloadSelector{
+				MatchLabels: map[string]string{}, // Apply to all workloads
+			},
+			Rules: []*istiosecurityv1.Rule{
+				{
+					From: []*istiosecurityv1.Rule_From{
+						{
+							Source: &istiosecurityv1.Source{
+								Namespaces: allowedNamespaces,
+							},
+						},
+					},
+				},
+			},
+			Action: istiosecurityv1.AuthorizationPolicy_ALLOW,
+		}
+		return ctrlutil.SetControllerReference(w, policy, r.Scheme)
+	})
+	if err != nil {
+		return err
+	}
+	if op != ctrlutil.OperationResultNone {
+		log.FromContext(ctx).Info("AuthorizationPolicy reconciled", "operation", op, "name", policy.Name)
 	}
 	return nil
 }
@@ -530,7 +532,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 		newStatus.RoleBindingRefs = append(newStatus.RoleBindingRefs, corev1.ObjectReference{
 			APIVersion: rbacv1.SchemeGroupVersion.String(),
 			Kind:       "RoleBinding",
-			Name:       w.Name + "-binding-" + string(role),
+			Name:       workspaceRoleBindingName + "-" + string(role),
 			Namespace:  w.Spec.Namespace,
 		})
 	}
@@ -540,7 +542,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 		newStatus.ResourceQuotaRef = &corev1.ObjectReference{
 			APIVersion: corev1.SchemeGroupVersion.String(),
 			Kind:       "ResourceQuota",
-			Name:       w.Name + "-quota",
+			Name:       workspaceResourceQuotaName,
 			Namespace:  w.Spec.Namespace,
 		}
 	} else {
@@ -552,7 +554,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 		newStatus.LimitRangeRef = &corev1.ObjectReference{
 			APIVersion: corev1.SchemeGroupVersion.String(),
 			Kind:       "LimitRange",
-			Name:       w.Name + "-limits",
+			Name:       workspaceLimitRangeName,
 			Namespace:  w.Spec.Namespace,
 		}
 	} else {
@@ -562,33 +564,33 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 	// Update Network Isolation resources
 	if w.Spec.NetworkIsolation.Enabled {
 		if r.istioEnabled {
+			newStatus.NetworkPolicyRef = nil
 			newStatus.PeerAuthenticationRef = &corev1.ObjectReference{
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
 				Kind:       "PeerAuthentication",
-				Name:       w.Name + "-strict-mtls",
+				Name:       workspacePeerAuthenticationName,
 				Namespace:  w.Spec.Namespace,
 			}
 			newStatus.AuthorizationPolicyRef = &corev1.ObjectReference{
 				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
 				Kind:       "AuthorizationPolicy",
-				Name:       w.Name + "-network-isolation",
+				Name:       workspaceAuthorizationPolicyName,
 				Namespace:  w.Spec.Namespace,
 			}
-			newStatus.NetworkPolicyRef = nil
 		} else {
-			newStatus.PeerAuthenticationRef = nil
-			newStatus.AuthorizationPolicyRef = nil
 			newStatus.NetworkPolicyRef = &corev1.ObjectReference{
 				APIVersion: networkingv1.SchemeGroupVersion.String(),
 				Kind:       "NetworkPolicy",
-				Name:       w.Name + "-network-isolation",
+				Name:       workspaceNetworkPolicyName,
 				Namespace:  w.Spec.Namespace,
 			}
+			newStatus.PeerAuthenticationRef = nil
+			newStatus.AuthorizationPolicyRef = nil
 		}
 	} else {
+		newStatus.NetworkPolicyRef = nil
 		newStatus.PeerAuthenticationRef = nil
 		newStatus.AuthorizationPolicyRef = nil
-		newStatus.NetworkPolicyRef = nil
 	}
 
 	// Set Ready condition
