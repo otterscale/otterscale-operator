@@ -6,6 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: workspace-sample
 spec:
+  namespace: "this-is-user-namespace"
   users:
     - name: "aaa"
       subject: "aaa"
