@@ -260,9 +260,6 @@ spec:
             - namespace
             - users
             type: object
-            x-kubernetes-validations:
-            - message: At least one user must have the 'admin' role
-              rule: self.users.exists(u, u.role == 'admin')
           status:
             description: Status represents the current information about the Workspace.
             properties:
