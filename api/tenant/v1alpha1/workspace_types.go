@@ -73,8 +73,6 @@ type WorkspaceNetworkIsolation struct {
 
 // WorkspaceSpec defines the desired state of the Workspace.
 // It includes user management, resource constraints, and network security settings.
-//
-// +kubebuilder:validation:XValidation:rule="self.users.exists(u, u.role == 'admin')",message="At least one user must have the 'admin' role"
 type WorkspaceSpec struct {
 	// Namespace is the name of the Kubernetes Namespace to be created for this workspace.
 	// It must be unique across all Workspaces.
