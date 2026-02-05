@@ -118,7 +118,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// 0. Reconcile Self Labels (Label Mirroring)
 	updated, err := r.reconcileUserLabels(ctx, &w)
 	if err != nil {
-		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "LabelSyncError", err.Error())
+		_ = r.setReadyConditionFalse(ctx, &w, "LabelSyncError", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -131,34 +131,34 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if err := r.reconcileNamespace(ctx, &w); err != nil {
 		var nce *namespaceConflictError
 		if errors.As(err, &nce) {
-			_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "NamespaceConflict", err.Error())
+			_ = r.setReadyConditionFalse(ctx, &w, "NamespaceConflict", err.Error())
 		} else {
-			_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "NamespaceError", err.Error())
+			_ = r.setReadyConditionFalse(ctx, &w, "NamespaceError", err.Error())
 		}
 		return ctrl.Result{}, err
 	}
 
 	// 2. Reconcile RBAC RoleBindings (Bind users to roles)
 	if err := r.reconcileRoleBindings(ctx, &w); err != nil {
-		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "RBACError", err.Error())
+		_ = r.setReadyConditionFalse(ctx, &w, "RBACError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	// 3. Reconcile ResourceQuota (Enforce hard limits on resources)
 	if err := r.reconcileResourceQuota(ctx, &w); err != nil {
-		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "ResourceQuotaError", err.Error())
+		_ = r.setReadyConditionFalse(ctx, &w, "ResourceQuotaError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	// 4. Reconcile LimitRange (Set default limits for pods)
 	if err := r.reconcileLimitRange(ctx, &w); err != nil {
-		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "LimitRangeError", err.Error())
+		_ = r.setReadyConditionFalse(ctx, &w, "LimitRangeError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	// 5. Reconcile Network Isolation (NetworkPolicy or Istio AuthzPolicy)
 	if err := r.reconcileNetworkIsolation(ctx, &w); err != nil {
-		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "NetworkIsolationError", err.Error())
+		_ = r.setReadyConditionFalse(ctx, &w, "NetworkIsolationError", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -170,10 +170,10 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-func (r *WorkspaceReconciler) setReadyCondition(ctx context.Context, w *tenantv1alpha1.Workspace, status metav1.ConditionStatus, reason, message string) error {
+func (r *WorkspaceReconciler) setReadyConditionFalse(ctx context.Context, w *tenantv1alpha1.Workspace, reason, message string) error {
 	meta.SetStatusCondition(&w.Status.Conditions, metav1.Condition{
 		Type:               "Ready",
-		Status:             status,
+		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,
 		ObservedGeneration: w.Generation,
@@ -693,9 +693,13 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 	}
 
 	// Set Ready condition
-	if err := r.setReadyCondition(ctx, w, metav1.ConditionTrue, "Reconciled", "Workspace resources are successfully reconciled"); err != nil {
-		return err
-	}
+	meta.SetStatusCondition(&newStatus.Conditions, metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionTrue,
+		Reason:             "Reconciled",
+		Message:            "Workspace resources are successfully reconciled",
+		ObservedGeneration: w.Generation,
+	})
 
 	// Check for changes before making an API call to reduce load on the API server
 	if !equality.Semantic.DeepEqual(w.Status, *newStatus) {
