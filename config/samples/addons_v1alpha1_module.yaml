@@ -1,0 +1,12 @@
+apiVersion: addons.otterscale.io/v1alpha1
+kind: Module
+metadata:
+  labels:
+    app.kubernetes.io/name: otterscale-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: module-sample
+spec:
+  # enabled toggles creation of the underlying Flux resource(s).
+  enabled: false
+  # templateRef defaults to metadata.name if omitted.
+  # templateRef: module-sample
