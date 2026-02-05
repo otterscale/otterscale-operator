@@ -1,0 +1,3 @@
+resources:
+  - module_templates_configmap.yaml
+
