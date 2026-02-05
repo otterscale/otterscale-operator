@@ -15,7 +15,7 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.namespace.name
+    - jsonPath: .status.namespaceRef.name
       name: Namespace
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -48,6 +48,16 @@ spec:
           spec:
             description: Spec defines the desired behavior of the Workspace.
             properties:
+              deletionPolicy:
+                default: OrphanNamespace
+                description: |-
+                  DeletionPolicy controls what happens to the underlying namespace when this Workspace is deleted.
+                  - OrphanNamespace (default): keep the namespace and its contents.
+                  - DeleteNamespace: delete the namespace (and therefore everything inside it).
+                enum:
+                - OrphanNamespace
+                - DeleteNamespace
+                type: string
               limitRange:
                 description: LimitRange describes the default resource limits and
                   requests for pods in the workspace.
@@ -135,6 +145,8 @@ spec:
                 x-kubernetes-validations:
                 - message: namespace is immutable
                   rule: self == oldSelf
+                - message: namespace is reserved and cannot be used for a workspace
+                  rule: '!(self in [''default'',''kube-system'',''kube-public'',''kube-node-lease'',''otterscale-operator-system''])'
               networkIsolation:
                 description: NetworkIsolation defines the ingress traffic rules for
                   the workspace.
@@ -145,7 +157,11 @@ spec:
                       when isolation is enabled. Essential system namespaces (e.g., 'istio-system', 'monitoring')
                       should be included here if required.
                     items:
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$
                       type: string
+                    maxItems: 64
                     type: array
                     x-kubernetes-list-type: set
                   enabled:
@@ -256,6 +272,9 @@ spec:
                 x-kubernetes-list-map-keys:
                 - subject
                 x-kubernetes-list-type: map
+                x-kubernetes-validations:
+                - message: at least one workspace user must have role 'admin'
+                  rule: self.exists(u, u.role == 'admin')
             required:
             - namespace
             - users

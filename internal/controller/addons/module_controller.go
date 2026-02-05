@@ -98,11 +98,7 @@ func (r *ModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	r.applyDefaults()
 
 	if !m.Spec.Enabled {
-		res, err := r.reconcileDisabled(ctx, &m)
-		if err != nil {
-			return res, err
-		}
-		return res, r.updateStatusIfChanged(ctx, &m, originalStatus, nil)
+		return r.reconcileDisabled(ctx, &m), r.updateStatusIfChanged(ctx, &m, originalStatus, nil)
 	}
 
 	cm, templates, err := r.loadTemplates(ctx)
@@ -432,7 +428,7 @@ func mapReadyConditionFromFlux(u *unstructured.Unstructured) *metav1.Condition {
 	return nil
 }
 
-func (r *ModuleReconciler) reconcileDisabled(ctx context.Context, m *addonsv1alpha1.Module) (ctrl.Result, error) {
+func (r *ModuleReconciler) reconcileDisabled(ctx context.Context, m *addonsv1alpha1.Module) ctrl.Result {
 	for _, ref := range m.Status.AppliedResources {
 		if ref.APIVersion == "" || ref.Kind == "" || ref.Name == "" {
 			continue
@@ -448,7 +444,7 @@ func (r *ModuleReconciler) reconcileDisabled(ctx context.Context, m *addonsv1alp
 				Reason:  "DeleteFailed",
 				Message: err.Error(),
 			})
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
+			return ctrl.Result{RequeueAfter: time.Minute}
 		}
 	}
 
@@ -471,7 +467,7 @@ func (r *ModuleReconciler) reconcileDisabled(ctx context.Context, m *addonsv1alp
 		Reason:  "Disabled",
 		Message: "module is disabled",
 	})
-	return ctrl.Result{}, nil
+	return ctrl.Result{}
 }
 
 func (r *ModuleReconciler) updateStatusIfChanged(ctx context.Context, m *addonsv1alpha1.Module, original addonsv1alpha1.ModuleStatus, templatesCM *corev1.ConfigMap) error {

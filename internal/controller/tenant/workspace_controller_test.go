@@ -79,8 +79,9 @@ var _ = Describe("Workspace Controller", func() {
 	}
 
 	fullyReconcile := func() {
-		executeReconcile() // First reconcile updates labels
-		executeReconcile() // Second reconcile provisions resources
+		executeReconcile() // 1) adds finalizer
+		executeReconcile() // 2) syncs user labels
+		executeReconcile() // 3) provisions resources + updates status
 	}
 
 	fetchResource := func(obj client.Object, name, namespace string) {
@@ -113,6 +114,8 @@ var _ = Describe("Workspace Controller", func() {
 		if err := k8sClient.Get(ctx, nsName, workspace); err == nil {
 			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
 			Eventually(func() bool {
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+				Expect(err).NotTo(HaveOccurred())
 				return errors.IsNotFound(k8sClient.Get(ctx, nsName, workspace))
 			}, timeout, interval).Should(BeTrue())
 		}
@@ -141,6 +144,71 @@ var _ = Describe("Workspace Controller", func() {
 			readyCond := meta.FindStatusCondition(workspace.Status.Conditions, "Ready")
 			Expect(readyCond).NotTo(BeNil())
 			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+		})
+	})
+
+	Context("Namespace Conflict Handling", func() {
+		It("should set Ready=False with NamespaceConflict when namespace already exists", func() {
+			By("Creating an existing namespace not owned by the workspace")
+			Expect(k8sClient.Create(ctx, &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: namespaceName},
+			})).To(Succeed())
+
+			By("Running reconciliation until it hits the namespace conflict")
+			nsName := types.NamespacedName{Name: resourceName}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred()) // add finalizer
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred()) // sync labels
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).To(HaveOccurred())
+
+			By("Verifying the status condition is updated")
+			fetchResource(workspace, resourceName, "")
+			readyCond := meta.FindStatusCondition(workspace.Status.Conditions, "Ready")
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal("NamespaceConflict"))
+		})
+	})
+
+	Context("Deletion Policy", func() {
+		BeforeEach(func() {
+			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
+				ws.Spec.DeletionPolicy = tenantv1alpha1.WorkspaceDeletionPolicyDeleteNamespace
+			})
+		})
+
+		It("should delete the namespace when deletionPolicy=DeleteNamespace", func() {
+			fullyReconcile()
+
+			By("Deleting the workspace and requesting namespace deletion")
+			wsKey := types.NamespacedName{Name: resourceName}
+			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
+
+			Eventually(func() bool {
+				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: wsKey})
+				Expect(err).NotTo(HaveOccurred())
+
+				var ns corev1.Namespace
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: namespaceName}, &ns); err != nil {
+					return false
+				}
+				return !ns.DeletionTimestamp.IsZero()
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying deletion is blocked by the workspace finalizer")
+			var ws tenantv1alpha1.Workspace
+			Expect(k8sClient.Get(ctx, wsKey, &ws)).To(Succeed())
+			Expect(ws.Finalizers).To(ContainElement(workspaceFinalizerName))
+
+			By("Cleaning up by removing the finalizer (envtest has no namespace controller)")
+			ws.Finalizers = nil
+			Expect(k8sClient.Update(ctx, &ws)).To(Succeed())
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, wsKey, &tenantv1alpha1.Workspace{}))
+			}, timeout, interval).Should(BeTrue())
 		})
 	})
 
@@ -180,8 +248,8 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying deletion")
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-quota", Namespace: resourceName}, &quota))).To(BeTrue())
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-limits", Namespace: resourceName}, &limit))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceResourceQuotaName, Namespace: namespaceName}, &quota))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceLimitRangeName, Namespace: namespaceName}, &limit))).To(BeTrue())
 		})
 	})
 
@@ -211,7 +279,7 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying NetworkPolicy deletion")
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-network-isolation", Namespace: resourceName}, &netpol))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceNetworkPolicyName, Namespace: namespaceName}, &netpol))).To(BeTrue())
 		})
 	})
 
@@ -243,7 +311,7 @@ var _ = Describe("Workspace Controller", func() {
 			fullyReconcile()
 
 			By("Verifying View RoleBinding is gone")
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-binding-view", Namespace: resourceName}, &viewBinding))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceRoleBindingName + "-view", Namespace: namespaceName}, &viewBinding))).To(BeTrue())
 		})
 	})
 
@@ -260,14 +328,14 @@ var _ = Describe("Workspace Controller", func() {
 			By("Allowing admin update")
 			adminClient := createImpersonatedClient(adminUser)
 			var latestWs tenantv1alpha1.Workspace
-			fetchResource(&latestWs, resourceName, namespaceName)
+			fetchResource(&latestWs, resourceName, "")
 
 			latestWs.Spec.NetworkIsolation.Enabled = true
 			Expect(adminClient.Update(ctx, &latestWs)).To(Succeed())
 
 			By("Denying non-admin update")
 			viewClient := createImpersonatedClient(viewUser)
-			fetchResource(&latestWs, resourceName, namespaceName) // Refresh
+			fetchResource(&latestWs, resourceName, "") // Refresh
 
 			latestWs.Spec.NetworkIsolation.Enabled = false
 			err := viewClient.Update(ctx, &latestWs)
@@ -296,6 +364,7 @@ var _ = Describe("Workspace Controller", func() {
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
 			executeReconcile()
+			executeReconcile()
 
 			By("Fetching the reconciled Workspace")
 			fetchResource(workspace, resourceName, "")
@@ -309,6 +378,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should update labels when users are added", func() {
+			executeReconcile()
 			executeReconcile()
 
 			By("Adding a new user")
@@ -331,6 +401,7 @@ var _ = Describe("Workspace Controller", func() {
 
 		It("should update labels when users are removed", func() {
 			executeReconcile()
+			executeReconcile()
 
 			By("Removing the view user")
 			fetchResource(workspace, resourceName, "")
@@ -348,6 +419,7 @@ var _ = Describe("Workspace Controller", func() {
 		})
 
 		It("should update labels when user list is completely replaced", func() {
+			executeReconcile()
 			executeReconcile()
 
 			By("Replacing all users")
@@ -379,6 +451,7 @@ var _ = Describe("Workspace Controller", func() {
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
+			executeReconcile()
 			executeReconcile()
 
 			By("Verifying special character handling")
