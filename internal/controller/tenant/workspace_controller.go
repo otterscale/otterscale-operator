@@ -18,12 +18,14 @@ package tenant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -53,7 +55,17 @@ const (
 	workspaceNetworkPolicyName       = "workspace-network-policy"
 	workspacePeerAuthenticationName  = "workspace-peer-authentication"
 	workspaceAuthorizationPolicyName = "workspace-authorization-policy"
+
+	workspaceFinalizerName = "tenant.otterscale.io/workspace-finalizer"
 )
+
+type namespaceConflictError struct {
+	name string
+}
+
+func (e *namespaceConflictError) Error() string {
+	return fmt.Sprintf("namespace %s exists but is not owned by this workspace", e.name)
+}
 
 // WorkspaceReconciler reconciles a Workspace object.
 // It ensures that the underlying Namespace, RBAC roles, ResourceQuotas, and NetworkPolicies
@@ -89,9 +101,24 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Handle deletion first to ensure finalizer-driven behavior is respected.
+	if !w.DeletionTimestamp.IsZero() {
+		return r.reconcileDeletion(ctx, &w)
+	}
+
+	// Ensure finalizer is present for safe, explicit deletion handling.
+	if !ctrlutil.ContainsFinalizer(&w, workspaceFinalizerName) {
+		ctrlutil.AddFinalizer(&w, workspaceFinalizerName)
+		if err := r.Update(ctx, &w); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// 0. Reconcile Self Labels (Label Mirroring)
 	updated, err := r.reconcileUserLabels(ctx, &w)
 	if err != nil {
+		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "LabelSyncError", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -102,26 +129,36 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// 1. Reconcile Namespace (The foundation of the workspace)
 	if err := r.reconcileNamespace(ctx, &w); err != nil {
+		var nce *namespaceConflictError
+		if errors.As(err, &nce) {
+			_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "NamespaceConflict", err.Error())
+		} else {
+			_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "NamespaceError", err.Error())
+		}
 		return ctrl.Result{}, err
 	}
 
 	// 2. Reconcile RBAC RoleBindings (Bind users to roles)
 	if err := r.reconcileRoleBindings(ctx, &w); err != nil {
+		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "RBACError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	// 3. Reconcile ResourceQuota (Enforce hard limits on resources)
 	if err := r.reconcileResourceQuota(ctx, &w); err != nil {
+		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "ResourceQuotaError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	// 4. Reconcile LimitRange (Set default limits for pods)
 	if err := r.reconcileLimitRange(ctx, &w); err != nil {
+		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "LimitRangeError", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	// 5. Reconcile Network Isolation (NetworkPolicy or Istio AuthzPolicy)
 	if err := r.reconcileNetworkIsolation(ctx, &w); err != nil {
+		_ = r.setReadyCondition(ctx, &w, metav1.ConditionFalse, "NetworkIsolationError", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -130,6 +167,68 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	return ctrl.Result{}, nil
+}
+
+func (r *WorkspaceReconciler) setReadyCondition(ctx context.Context, w *tenantv1alpha1.Workspace, status metav1.ConditionStatus, reason, message string) error {
+	meta.SetStatusCondition(&w.Status.Conditions, metav1.Condition{
+		Type:               "Ready",
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: w.Generation,
+	})
+	return r.Status().Update(ctx, w)
+}
+
+func (r *WorkspaceReconciler) reconcileDeletion(ctx context.Context, w *tenantv1alpha1.Workspace) (ctrl.Result, error) {
+	policy := w.Spec.DeletionPolicy
+	if policy == "" {
+		policy = tenantv1alpha1.WorkspaceDeletionPolicyOrphanNamespace
+	}
+
+	switch policy {
+	case tenantv1alpha1.WorkspaceDeletionPolicyDeleteNamespace:
+		if w.Spec.Namespace != "" {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: w.Spec.Namespace}}
+			if err := client.IgnoreNotFound(r.Delete(ctx, ns)); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// Wait until the namespace is gone before removing the finalizer.
+			var current corev1.Namespace
+			if err := r.Get(ctx, types.NamespacedName{Name: w.Spec.Namespace}, &current); err == nil {
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			} else if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		}
+	default: // OrphanNamespace
+		if w.Spec.Namespace != "" {
+			var ns corev1.Namespace
+			if err := r.Get(ctx, types.NamespacedName{Name: w.Spec.Namespace}, &ns); err == nil {
+				newRefs := make([]metav1.OwnerReference, 0, len(ns.OwnerReferences))
+				for _, ref := range ns.OwnerReferences {
+					if ref.UID != w.UID {
+						newRefs = append(newRefs, ref)
+					}
+				}
+				if len(newRefs) != len(ns.OwnerReferences) {
+					ns.OwnerReferences = newRefs
+					if err := r.Update(ctx, &ns); err != nil {
+						return ctrl.Result{}, err
+					}
+				}
+			} else if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
+	ctrlutil.RemoveFinalizer(w, workspaceFinalizerName)
+	if err := r.Update(ctx, w); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -214,7 +313,7 @@ func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, namespace, func() error {
 		// Safety check: Prevent taking over existing namespaces not owned by us
 		if !isOwned(namespace.OwnerReferences, w.UID) && !namespace.CreationTimestamp.IsZero() {
-			return fmt.Errorf("namespace %s exists but is not owned by this workspace", namespace.Name)
+			return &namespaceConflictError{name: namespace.Name}
 		}
 
 		if namespace.Labels == nil {
@@ -594,12 +693,9 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 	}
 
 	// Set Ready condition
-	meta.SetStatusCondition(&newStatus.Conditions, metav1.Condition{
-		Type:    "Ready",
-		Status:  metav1.ConditionTrue,
-		Reason:  "Reconciled",
-		Message: "Workspace resources are successfully reconciled",
-	})
+	if err := r.setReadyCondition(ctx, w, metav1.ConditionTrue, "Reconciled", "Workspace resources are successfully reconciled"); err != nil {
+		return err
+	}
 
 	// Check for changes before making an API call to reduce load on the API server
 	if !equality.Semantic.DeepEqual(w.Status, *newStatus) {

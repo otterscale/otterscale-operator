@@ -134,4 +134,109 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 			Expect(adminClient.Update(ctx, &ws)).To(Succeed())
 		})
 	})
+
+	Context("CRD CEL Validations", func() {
+		It("should reject a Workspace with no admin user", func() {
+			workspace = &tenantv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: "view-user"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, workspace)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("at least one workspace user must have role 'admin'"))
+		})
+
+		It("should reject a reserved namespace", func() {
+			workspace = &tenantv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: "kube-system",
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, workspace)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("namespace is reserved and cannot be used for a workspace"))
+		})
+
+		It("should reject invalid allowedNamespaces entries", func() {
+			workspace = &tenantv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
+					},
+					NetworkIsolation: tenantv1alpha1.WorkspaceNetworkIsolation{
+						Enabled:           true,
+						AllowedNamespaces: []string{"BAD_NAMESPACE"},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, workspace)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.networkIsolation.allowedNamespaces[0]"))
+			Expect(err.Error()).To(ContainSubstring("should match '^([a-z0-9]"))
+		})
+	})
+
+	Context("Admission Policy - Delete Protection", func() {
+		createImpersonatedClient := func(user string, groups []string) client.Client {
+			cfgCopy := *cfg
+			if groups == nil {
+				groups = []string{"system:authenticated"}
+			}
+			cfgCopy.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: groups}
+			c, err := client.New(&cfgCopy, client.Options{Scheme: k8sClient.Scheme()})
+			Expect(err).NotTo(HaveOccurred())
+			return c
+		}
+
+		BeforeEach(func() {
+			workspace = &tenantv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec: tenantv1alpha1.WorkspaceSpec{
+					Namespace: string(uuid.NewUUID()),
+					Users: []tenantv1alpha1.WorkspaceUser{
+						{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: "admin-user"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, workspace)).To(Succeed())
+		})
+
+		It("should deny delete for workspace admin without explicit opt-in", func() {
+			adminClient := createImpersonatedClient("admin-user", nil)
+
+			var ws tenantv1alpha1.Workspace
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName}, &ws)).To(Succeed())
+
+			err := adminClient.Delete(ctx, &ws)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("workspace deletion is protected"))
+		})
+
+		It("should allow delete for workspace admin with annotation opt-in", func() {
+			adminClient := createImpersonatedClient("admin-user", nil)
+
+			var ws tenantv1alpha1.Workspace
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName}, &ws)).To(Succeed())
+			if ws.Annotations == nil {
+				ws.Annotations = map[string]string{}
+			}
+			ws.Annotations["tenant.otterscale.io/allow-delete"] = "true"
+			Expect(adminClient.Update(ctx, &ws)).To(Succeed())
+
+			// Refresh to ensure oldObject contains the annotation at delete time.
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName}, &ws)).To(Succeed())
+			Expect(adminClient.Delete(ctx, &ws)).To(Succeed())
+		})
+	})
 })

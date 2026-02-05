@@ -36,6 +36,20 @@ const (
 	WorkspaceUserRoleView WorkspaceUserRole = "view"
 )
 
+// WorkspaceDeletionPolicy controls how underlying resources behave on deletion.
+// +kubebuilder:validation:Enum=OrphanNamespace;DeleteNamespace
+// +enum
+type WorkspaceDeletionPolicy string
+
+const (
+	// WorkspaceDeletionPolicyOrphanNamespace keeps the namespace and its contents.
+	// The controller removes ownership to prevent garbage collection.
+	WorkspaceDeletionPolicyOrphanNamespace WorkspaceDeletionPolicy = "OrphanNamespace"
+
+	// WorkspaceDeletionPolicyDeleteNamespace deletes the underlying namespace.
+	WorkspaceDeletionPolicyDeleteNamespace WorkspaceDeletionPolicy = "DeleteNamespace"
+)
+
 // WorkspaceUser defines a single user entity associated with a workspace.
 type WorkspaceUser struct {
 	// Role defines the authorization level (Admin, Edit, View).
@@ -67,6 +81,10 @@ type WorkspaceNetworkIsolation struct {
 	// when isolation is enabled. Essential system namespaces (e.g., 'istio-system', 'monitoring')
 	// should be included here if required.
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
 	// +optional
 	AllowedNamespaces []string `json:"allowedNamespaces,omitempty"`
 }
@@ -80,6 +98,7 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable"
+	// +kubebuilder:validation:XValidation:rule="!(self in ['default','kube-system','kube-public','kube-node-lease','otterscale-operator-system'])",message="namespace is reserved and cannot be used for a workspace"
 	// +required
 	Namespace string `json:"namespace"`
 
@@ -87,8 +106,16 @@ type WorkspaceSpec struct {
 	// +listType=map
 	// +listMapKey=subject
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:XValidation:rule="self.exists(u, u.role == 'admin')",message="at least one workspace user must have role 'admin'"
 	// +required
 	Users []WorkspaceUser `json:"users,omitempty"`
+
+	// DeletionPolicy controls what happens to the underlying namespace when this Workspace is deleted.
+	// - OrphanNamespace (default): keep the namespace and its contents.
+	// - DeleteNamespace: delete the namespace (and therefore everything inside it).
+	// +kubebuilder:default:=OrphanNamespace
+	// +optional
+	DeletionPolicy WorkspaceDeletionPolicy `json:"deletionPolicy,omitempty"`
 
 	// ResourceQuota describes the compute resource constraints (CPU, Memory, etc.) applied to the underlying namespace.
 	// +optional
@@ -145,7 +172,7 @@ type WorkspaceStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
-// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace.name`
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespaceRef.name`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Workspace is the Schema for the workspaces API.
