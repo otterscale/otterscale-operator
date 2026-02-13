@@ -1,4 +1,4 @@
-apiVersion: apps.otterscale.io/v1
+apiVersion: apps.otterscale.io/v1alpha1
 kind: SimpleApp
 metadata:
   labels:

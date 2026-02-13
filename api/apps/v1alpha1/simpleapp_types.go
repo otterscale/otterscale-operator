@@ -27,9 +27,8 @@ import (
 // SimpleAppSpec defines the desired state of SimpleApp
 type SimpleAppSpec struct {
 	// deploymentSpec defines the Deployment configuration
-	// If specified, a Deployment will be created
-	// +optional
-	DeploymentSpec *appsv1.DeploymentSpec `json:"deploymentSpec,omitempty"`
+	// +kubebuilder:validation:Required
+	DeploymentSpec *appsv1.DeploymentSpec `json:"deploymentSpec"`
 
 	// serviceSpec defines the Service configuration
 	// If specified, a Service will be created
@@ -90,7 +89,7 @@ type SimpleApp struct {
 
 	// metadata is a standard object metadata
 	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// spec defines the desired state of SimpleApp
 	// +required
@@ -98,7 +97,7 @@ type SimpleApp struct {
 
 	// status defines the observed state of SimpleApp
 	// +optional
-	Status SimpleAppStatus `json:"status,omitzero"`
+	Status SimpleAppStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -106,7 +105,7 @@ type SimpleApp struct {
 // SimpleAppList contains a list of SimpleApp
 type SimpleAppList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitzero"`
+	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []SimpleApp `json:"items"`
 }
 

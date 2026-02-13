@@ -88,18 +88,6 @@ func (r *SimpleAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	// Service and PVC cannot exist without Deployment
-	if app.Spec.DeploymentSpec == nil {
-		if err := r.deleteAllResources(ctx, &app); err != nil {
-			_ = r.setReadyConditionFalse(ctx, &app, "DeletionError", err.Error())
-			return ctrl.Result{}, err
-		}
-		if err := r.updateStatus(ctx, &app); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
 	// 1. Reconcile PVC (must exist before Deployment)
 	if err := r.reconcilePVC(ctx, &app); err != nil {
 		_ = r.setReadyConditionFalse(ctx, &app, "PVCError", err.Error())
@@ -146,43 +134,6 @@ func (r *SimpleAppReconciler) reconcileDeletion(ctx context.Context, app *appsv1
 	return ctrl.Result{}, nil
 }
 
-// deleteAllResources deletes all managed resources (Deployment, Service, PVC).
-func (r *SimpleAppReconciler) deleteAllResources(ctx context.Context, app *appsv1alpha1.SimpleApp) error {
-	// Delete Deployment
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      app.Name + simpleAppDeploymentSuffix,
-			Namespace: app.Namespace,
-		},
-	}
-	if err := client.IgnoreNotFound(r.Delete(ctx, deployment)); err != nil {
-		return err
-	}
-
-	// Delete Service
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      app.Name + simpleAppServiceSuffix,
-			Namespace: app.Namespace,
-		},
-	}
-	if err := client.IgnoreNotFound(r.Delete(ctx, service)); err != nil {
-		return err
-	}
-
-	// Delete PVC
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      app.Name + simpleAppPVCSuffix,
-			Namespace: app.Namespace,
-		},
-	}
-	if err := client.IgnoreNotFound(r.Delete(ctx, pvc)); err != nil {
-		return err
-	}
-	return nil
-}
-
 // reconcilePVC creates or updates the PVC.
 func (r *SimpleAppReconciler) reconcilePVC(ctx context.Context, app *appsv1alpha1.SimpleApp) error {
 	pvc := &corev1.PersistentVolumeClaim{
@@ -224,6 +175,11 @@ func (r *SimpleAppReconciler) reconcileDeployment(ctx context.Context, app *apps
 
 	// Validate selector matches template labels
 	if err := r.validateDeploymentSpec(app.Spec.DeploymentSpec); err != nil {
+		return err
+	}
+
+	// Validate security constraints to prevent privilege escalation
+	if err := r.validateSecurityConstraints(app.Spec.DeploymentSpec); err != nil {
 		return err
 	}
 
@@ -273,16 +229,12 @@ func (r *SimpleAppReconciler) updateStatus(ctx context.Context, app *appsv1alpha
 	// Deep copy to avoid mutating the fetched object
 	newStatus := app.Status.DeepCopy()
 
-	// Update Deployment reference
-	if app.Spec.DeploymentSpec != nil {
-		newStatus.DeploymentRef = &corev1.ObjectReference{
-			APIVersion: appsv1.SchemeGroupVersion.String(),
-			Kind:       "Deployment",
-			Name:       app.Name + simpleAppDeploymentSuffix,
-			Namespace:  app.Namespace,
-		}
-	} else {
-		newStatus.DeploymentRef = nil
+	// Update Deployment reference (always present since it's required)
+	newStatus.DeploymentRef = &corev1.ObjectReference{
+		APIVersion: appsv1.SchemeGroupVersion.String(),
+		Kind:       "Deployment",
+		Name:       app.Name + simpleAppDeploymentSuffix,
+		Namespace:  app.Namespace,
 	}
 
 	// Update Service reference
@@ -342,7 +294,7 @@ func (r *SimpleAppReconciler) validateDeploymentSpec(deploymentSpec *appsv1.Depl
 	}
 
 	// Check if template labels are defined
-	templateLabels := deploymentSpec.Template.ObjectMeta.Labels
+	templateLabels := deploymentSpec.Template.Labels
 	if len(templateLabels) == 0 {
 		return fmt.Errorf("deployment template labels must be specified")
 	}
@@ -353,6 +305,89 @@ func (r *SimpleAppReconciler) validateDeploymentSpec(deploymentSpec *appsv1.Depl
 			return fmt.Errorf("selector label %q not found in pod template labels", key)
 		} else if templateValue != value {
 			return fmt.Errorf("selector label %q=%q does not match pod template label value %q", key, value, templateValue)
+		}
+	}
+
+	return nil
+}
+
+// validateSecurityConstraints ensures that the deployment spec does not contain
+// privileged or dangerous configurations that could lead to privilege escalation.
+func (r *SimpleAppReconciler) validateSecurityConstraints(deploymentSpec *appsv1.DeploymentSpec) error {
+	if deploymentSpec == nil {
+		return nil
+	}
+
+	podSpec := &deploymentSpec.Template.Spec
+
+	// Check pod-level host access
+	if podSpec.HostNetwork {
+		return fmt.Errorf("hostNetwork is not allowed")
+	}
+	if podSpec.HostPID {
+		return fmt.Errorf("hostPID is not allowed")
+	}
+	if podSpec.HostIPC {
+		return fmt.Errorf("hostIPC is not allowed")
+	}
+
+	// Check for dangerous volume types
+	for _, vol := range podSpec.Volumes {
+		if vol.HostPath != nil {
+			return fmt.Errorf("hostPath volumes are not allowed")
+		}
+		// Allow emptyDir, configMap, secret, persistentVolumeClaim, projected, downwardAPI
+		// Block other types that could be dangerous
+	}
+
+	// Check container security contexts
+	for _, container := range podSpec.Containers {
+		if err := r.validateContainerSecurity(&container); err != nil {
+			return fmt.Errorf("container %q: %w", container.Name, err)
+		}
+	}
+
+	// Check init containers
+	for _, container := range podSpec.InitContainers {
+		if err := r.validateContainerSecurity(&container); err != nil {
+			return fmt.Errorf("init container %q: %w", container.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// validateContainerSecurity checks for privileged container configurations.
+func (r *SimpleAppReconciler) validateContainerSecurity(container *corev1.Container) error {
+	if container.SecurityContext == nil {
+		return nil
+	}
+
+	sc := container.SecurityContext
+
+	// Block privileged containers
+	if sc.Privileged != nil && *sc.Privileged {
+		return fmt.Errorf("privileged containers are not allowed")
+	}
+
+	// Block privilege escalation
+	if sc.AllowPrivilegeEscalation != nil && *sc.AllowPrivilegeEscalation {
+		return fmt.Errorf("allowPrivilegeEscalation must be false")
+	}
+
+	// Block dangerous capabilities
+	if sc.Capabilities != nil {
+		dangerousCaps := []string{
+			"SYS_ADMIN", "SYS_MODULE", "SYS_RAWIO", "SYS_PTRACE",
+			"SYS_BOOT", "MAC_ADMIN", "MAC_OVERRIDE", "NET_ADMIN",
+		}
+		for _, cap := range sc.Capabilities.Add {
+			capStr := string(cap)
+			for _, dangerous := range dangerousCaps {
+				if capStr == dangerous {
+					return fmt.Errorf("capability %q is not allowed", capStr)
+				}
+			}
 		}
 	}
 
