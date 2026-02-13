@@ -55,9 +55,7 @@ spec:
             description: spec defines the desired state of SimpleApp
             properties:
               deploymentSpec:
-                description: |-
-                  deploymentSpec defines the Deployment configuration
-                  If specified, a Deployment will be created
+                description: deploymentSpec defines the Deployment configuration
                 properties:
                   minReadySeconds:
                     description: |-
@@ -9301,6 +9299,8 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types
                     type: string
                 type: object
+            required:
+            - deploymentSpec
             type: object
           status:
             description: status defines the observed state of SimpleApp

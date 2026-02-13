@@ -174,18 +174,18 @@ func (r *SimpleAppReconciler) reconcileDeployment(ctx context.Context, app *apps
 	}
 
 	// Validate selector matches template labels
-	if err := r.validateDeploymentSpec(app.Spec.DeploymentSpec); err != nil {
+	if err := r.validateDeploymentSpec(&app.Spec.DeploymentSpec); err != nil {
 		return err
 	}
 
 	// Validate security constraints to prevent privilege escalation
-	if err := r.validateSecurityConstraints(app.Spec.DeploymentSpec); err != nil {
+	if err := r.validateSecurityConstraints(&app.Spec.DeploymentSpec); err != nil {
 		return err
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		deployment.Labels = labelsForSimpleApp(app.Name, r.Version)
-		deployment.Spec = *app.Spec.DeploymentSpec
+		deployment.Spec = app.Spec.DeploymentSpec
 		return ctrlutil.SetControllerReference(app, deployment, r.Scheme)
 	})
 	if err != nil {
@@ -284,10 +284,7 @@ func (r *SimpleAppReconciler) updateStatus(ctx context.Context, app *appsv1alpha
 
 // validateDeploymentSpec validates that the selector matches the pod template labels.
 func (r *SimpleAppReconciler) validateDeploymentSpec(deploymentSpec *appsv1.DeploymentSpec) error {
-	if deploymentSpec == nil {
-		return nil
-	}
-
+	// DeploymentSpec should never be nil at this point due to CRD validation
 	// Check if selector is defined
 	if deploymentSpec.Selector == nil || len(deploymentSpec.Selector.MatchLabels) == 0 {
 		return fmt.Errorf("deployment selector must be specified")
@@ -314,10 +311,7 @@ func (r *SimpleAppReconciler) validateDeploymentSpec(deploymentSpec *appsv1.Depl
 // validateSecurityConstraints ensures that the deployment spec does not contain
 // privileged or dangerous configurations that could lead to privilege escalation.
 func (r *SimpleAppReconciler) validateSecurityConstraints(deploymentSpec *appsv1.DeploymentSpec) error {
-	if deploymentSpec == nil {
-		return nil
-	}
-
+	// DeploymentSpec should never be nil at this point due to CRD validation
 	podSpec := &deploymentSpec.Template.Spec
 
 	// Check pod-level host access

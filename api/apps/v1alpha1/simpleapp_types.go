@@ -28,7 +28,7 @@ import (
 type SimpleAppSpec struct {
 	// deploymentSpec defines the Deployment configuration
 	// +kubebuilder:validation:Required
-	DeploymentSpec *appsv1.DeploymentSpec `json:"deploymentSpec"`
+	DeploymentSpec appsv1.DeploymentSpec `json:"deploymentSpec"`
 
 	// serviceSpec defines the Service configuration
 	// If specified, a Service will be created
