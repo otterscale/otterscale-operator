@@ -4,6 +4,7 @@
 resources:
 - bases/tenant.otterscale.io_workspaces.yaml
 - bases/addons.otterscale.io_modules.yaml
+- bases/apps.otterscale.io_simpleapps.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

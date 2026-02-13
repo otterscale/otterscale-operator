@@ -26,4 +26,13 @@ resources:
   kind: Module
   path: github.com/otterscale/otterscale-operator/api/addons/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: otterscale.io
+  group: apps
+  kind: SimpleApp
+  path: github.com/otterscale/otterscale-operator/api/apps/v1alpha1
+  version: v1alpha1
 version: "3"

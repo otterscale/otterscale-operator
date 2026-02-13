@@ -38,8 +38,10 @@ import (
 	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 
 	addonsv1alpha1 "github.com/otterscale/otterscale-operator/api/addons/v1alpha1"
+	appsv1alpha1 "github.com/otterscale/otterscale-operator/api/apps/v1alpha1"
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	addonscontroller "github.com/otterscale/otterscale-operator/internal/controller/addons"
+	appscontroller "github.com/otterscale/otterscale-operator/internal/controller/apps"
 	tenantcontroller "github.com/otterscale/otterscale-operator/internal/controller/tenant"
 	// +kubebuilder:scaffold:imports
 )
@@ -55,6 +57,7 @@ func init() {
 	utilruntime.Must(istioapisecurityv1.AddToScheme(scheme))
 	utilruntime.Must(tenantv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(addonsv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(appsv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -198,6 +201,13 @@ func main() {
 		Version: version,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Module")
+		os.Exit(1)
+	}
+	if err := (&appscontroller.SimpleAppReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SimpleApp")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
