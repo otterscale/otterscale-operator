@@ -3,4 +3,5 @@ resources:
 - tenant_v1alpha1_workspace.yaml
 - addons_v1alpha1_module.yaml
 - addons_v1alpha1_module_templates.yaml
+- apps_v1alpha1_simpleapp
 # +kubebuilder:scaffold:manifestskustomizesamples
