@@ -217,8 +217,6 @@ func applyManifest(path string) {
 			continue
 		}
 
-		if err := k8sClient.Create(ctx, obj); err != nil {
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 	}
 }

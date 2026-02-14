@@ -194,6 +194,16 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// If Istio is already available at startup, also watch owned Istio resources
 	// so that external drift (e.g. manual deletion) is detected immediately.
+	//
+	// Known limitation: if Istio is installed *after* the operator starts,
+	// these Owns() watches will NOT be registered because controller-runtime
+	// does not support adding watches dynamically after the controller starts.
+	// The CRD watcher above will still detect the installation and re-enqueue
+	// all Workspaces to create the Istio resources, but subsequent external
+	// drift on those Istio resources (e.g. someone manually deletes a
+	// PeerAuthentication) will not trigger reconciliation until the operator
+	// is restarted. Restarting the operator resolves this, as Istio CRDs will
+	// then be present at startup and the Owns() watches will be registered.
 	if r.istioDetector.IsEnabled() {
 		b.Owns(&istioapisecurityv1.PeerAuthentication{})
 		b.Owns(&istioapisecurityv1.AuthorizationPolicy{})

@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// nolint:unused
 // log is for logging in this package.
 var workspacelog = logf.Log.WithName("workspace-resource")
 
