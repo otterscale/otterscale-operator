@@ -67,3 +67,12 @@ func checkIstioEnabled(c *rest.Config) (bool, error) {
 	}
 	return isResourceSupported(dc, "networking.istio.io/v1beta1"), nil
 }
+
+// isResourceSupported checks if a CRD exists in the cluster.
+// This allows the controller to adapt its behavior based on the environment.
+func isResourceSupported(dc *discovery.DiscoveryClient, groupVersion string) bool {
+	if _, err := dc.ServerResourcesForGroupVersion(groupVersion); err != nil {
+		return false
+	}
+	return true
+}

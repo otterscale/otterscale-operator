@@ -14,7 +14,7 @@ spec:
     - expression: >-
         request.userInfo.groups.exists(g, g in ['system:masters', 'kubeadm:cluster-admins'])
         || request.userInfo.username == 'system:serviceaccount:otterscale-system:otterscale-operator-controller-manager'
-        || oldObject.spec.users.exists(u, u.subject == request.userInfo.username && u.role == 'admin')
+        || oldObject.spec.members.exists(u, u.subject == request.userInfo.username && u.role == 'admin')
       message: "only users with the 'admin' role defined in this workspace can modify or delete it."
     - expression: >-
         request.operation != 'DELETE'
