@@ -18,6 +18,9 @@ spec:
     - jsonPath: .status.namespaceRef.name
       name: Namespace
       type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -26,7 +29,7 @@ spec:
       openAPIV3Schema:
         description: |-
           Workspace is the Schema for the workspaces API.
-          A Workspace represents a logical isolation unit (Namespace) with associated policies, quotas, and user access.
+          A Workspace represents a logical isolation unit (Namespace) with associated policies, quotas, and member access.
         properties:
           apiVersion:
             description: |-
@@ -124,6 +127,45 @@ spec:
                 required:
                 - limits
                 type: object
+              members:
+                description: Members is the list of members granted access to this
+                  workspace.
+                items:
+                  description: WorkspaceMember defines a single member entity associated
+                    with a workspace.
+                  properties:
+                    name:
+                      description: Name is the human-readable display name of the
+                        member.
+                      type: string
+                    role:
+                      description: Role defines the authorization level (Admin, Edit,
+                        View).
+                      enum:
+                      - admin
+                      - edit
+                      - view
+                      type: string
+                    subject:
+                      description: |-
+                        Subject is the unique identifier of the member (e.g., OIDC subject or username).
+                        This identifier maps directly to the Kubernetes RBAC Subject.
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
+                      type: string
+                  required:
+                  - role
+                  - subject
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - subject
+                x-kubernetes-list-type: map
+                x-kubernetes-validations:
+                - message: at least one workspace member must have role 'admin'
+                  rule: self.exists(u, u.role == 'admin')
               namespace:
                 description: |-
                   Namespace is the name of the Kubernetes Namespace to be created for this workspace.
@@ -160,6 +202,11 @@ spec:
                       If true, default deny-all ingress rules are applied except for allowed namespaces.
                     type: boolean
                 type: object
+                x-kubernetes-validations:
+                - message: allowedNamespaces can only be set when network isolation
+                    is enabled
+                  rule: '!has(self.allowedNamespaces) || size(self.allowedNamespaces)
+                    == 0 || self.enabled'
               resourceQuota:
                 description: ResourceQuota describes the compute resource constraints
                   (CPU, Memory, etc.) applied to the underlying namespace.
@@ -227,47 +274,9 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
-              users:
-                description: Users is the list of users granted access to this workspace.
-                items:
-                  description: WorkspaceUser defines a single user entity associated
-                    with a workspace.
-                  properties:
-                    name:
-                      description: Name is the human-readable display name of the
-                        user.
-                      type: string
-                    role:
-                      description: Role defines the authorization level (Admin, Edit,
-                        View).
-                      enum:
-                      - admin
-                      - edit
-                      - view
-                      type: string
-                    subject:
-                      description: |-
-                        Subject is the unique identifier of the user (e.g., OIDC subject or username).
-                        This identifier maps directly to the Kubernetes RBAC Subject.
-                      maxLength: 63
-                      minLength: 1
-                      pattern: ^([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]$
-                      type: string
-                  required:
-                  - role
-                  - subject
-                  type: object
-                minItems: 1
-                type: array
-                x-kubernetes-list-map-keys:
-                - subject
-                x-kubernetes-list-type: map
-                x-kubernetes-validations:
-                - message: at least one workspace user must have role 'admin'
-                  rule: self.exists(u, u.role == 'admin')
             required:
+            - members
             - namespace
-            - users
             type: object
           status:
             description: Status represents the current information about the Workspace.
@@ -276,46 +285,17 @@ spec:
                 description: AuthorizationPolicyRef is a reference to the Istio AuthorizationPolicy
                   enforcing network isolation.
                 properties:
-                  apiVersion:
-                    description: API version of the referent.
-                    type: string
-                  fieldPath:
-                    description: |-
-                      If referring to a piece of an object instead of an entire object, this string
-                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                      For example, if the object reference is to a container within a pod, this would take on a value like:
-                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                      the event) or if no container name is specified "spec.containers[2]" (container with
-                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                      referencing a part of an object.
-                    type: string
-                  kind:
-                    description: |-
-                      Kind of the referent.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                    type: string
                   name:
-                    description: |-
-                      Name of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    description: Name is the name of the referenced resource.
                     type: string
                   namespace:
                     description: |-
-                      Namespace of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      Namespace is the namespace of the referenced resource.
+                      Empty for cluster-scoped resources.
                     type: string
-                  resourceVersion:
-                    description: |-
-                      Specific resourceVersion to which this reference is made, if any.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                    type: string
-                  uid:
-                    description: |-
-                      UID of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                    type: string
+                required:
+                - name
                 type: object
-                x-kubernetes-map-type: atomic
               conditions:
                 description: Conditions store the status conditions of the Workspace
                   (e.g., Ready, Failed).
@@ -378,274 +358,111 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               limitRangeRef:
-                description: LimitRangeRef is a reference to the corev1.LimitRange
-                  managed by this Workspace.
-                properties:
-                  apiVersion:
-                    description: API version of the referent.
-                    type: string
-                  fieldPath:
-                    description: |-
-                      If referring to a piece of an object instead of an entire object, this string
-                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                      For example, if the object reference is to a container within a pod, this would take on a value like:
-                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                      the event) or if no container name is specified "spec.containers[2]" (container with
-                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                      referencing a part of an object.
-                    type: string
-                  kind:
-                    description: |-
-                      Kind of the referent.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                    type: string
-                  name:
-                    description: |-
-                      Name of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                  namespace:
-                    description: |-
-                      Namespace of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
-                    type: string
-                  resourceVersion:
-                    description: |-
-                      Specific resourceVersion to which this reference is made, if any.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                    type: string
-                  uid:
-                    description: |-
-                      UID of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-              namespaceRef:
-                description: NamespaceRef is a reference to the corev1.Namespace managed
+                description: LimitRangeRef is a reference to the LimitRange managed
                   by this Workspace.
                 properties:
-                  apiVersion:
-                    description: API version of the referent.
-                    type: string
-                  fieldPath:
-                    description: |-
-                      If referring to a piece of an object instead of an entire object, this string
-                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                      For example, if the object reference is to a container within a pod, this would take on a value like:
-                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                      the event) or if no container name is specified "spec.containers[2]" (container with
-                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                      referencing a part of an object.
-                    type: string
-                  kind:
-                    description: |-
-                      Kind of the referent.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                    type: string
                   name:
-                    description: |-
-                      Name of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    description: Name is the name of the referenced resource.
                     type: string
                   namespace:
                     description: |-
-                      Namespace of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      Namespace is the namespace of the referenced resource.
+                      Empty for cluster-scoped resources.
                     type: string
-                  resourceVersion:
-                    description: |-
-                      Specific resourceVersion to which this reference is made, if any.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                    type: string
-                  uid:
-                    description: |-
-                      UID of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                    type: string
+                required:
+                - name
                 type: object
-                x-kubernetes-map-type: atomic
+              namespaceRef:
+                description: NamespaceRef is a reference to the Namespace managed
+                  by this Workspace.
+                properties:
+                  name:
+                    description: Name is the name of the referenced resource.
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of the referenced resource.
+                      Empty for cluster-scoped resources.
+                    type: string
+                required:
+                - name
+                type: object
               networkPolicyRef:
-                description: NetworkPolicyRef is a reference to the corev1.NetworkPolicy
+                description: NetworkPolicyRef is a reference to the NetworkPolicy
                   enforcing network isolation.
                 properties:
-                  apiVersion:
-                    description: API version of the referent.
-                    type: string
-                  fieldPath:
-                    description: |-
-                      If referring to a piece of an object instead of an entire object, this string
-                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                      For example, if the object reference is to a container within a pod, this would take on a value like:
-                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                      the event) or if no container name is specified "spec.containers[2]" (container with
-                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                      referencing a part of an object.
-                    type: string
-                  kind:
-                    description: |-
-                      Kind of the referent.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                    type: string
                   name:
-                    description: |-
-                      Name of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    description: Name is the name of the referenced resource.
                     type: string
                   namespace:
                     description: |-
-                      Namespace of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      Namespace is the namespace of the referenced resource.
+                      Empty for cluster-scoped resources.
                     type: string
-                  resourceVersion:
-                    description: |-
-                      Specific resourceVersion to which this reference is made, if any.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                    type: string
-                  uid:
-                    description: |-
-                      UID of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                    type: string
+                required:
+                - name
                 type: object
-                x-kubernetes-map-type: atomic
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed by the controller.
+                  It corresponds to the Workspace's generation, which is updated on mutation by the API Server.
+                  This allows clients to determine whether the controller has processed the latest spec changes.
+                format: int64
+                type: integer
               peerAuthenticationRef:
                 description: PeerAuthenticationRef is a reference to the Istio PeerAuthentication
                   resource for mTLS settings.
                 properties:
-                  apiVersion:
-                    description: API version of the referent.
-                    type: string
-                  fieldPath:
-                    description: |-
-                      If referring to a piece of an object instead of an entire object, this string
-                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                      For example, if the object reference is to a container within a pod, this would take on a value like:
-                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                      the event) or if no container name is specified "spec.containers[2]" (container with
-                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                      referencing a part of an object.
-                    type: string
-                  kind:
-                    description: |-
-                      Kind of the referent.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                    type: string
                   name:
-                    description: |-
-                      Name of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    description: Name is the name of the referenced resource.
                     type: string
                   namespace:
                     description: |-
-                      Namespace of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      Namespace is the namespace of the referenced resource.
+                      Empty for cluster-scoped resources.
                     type: string
-                  resourceVersion:
-                    description: |-
-                      Specific resourceVersion to which this reference is made, if any.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                    type: string
-                  uid:
-                    description: |-
-                      UID of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                    type: string
+                required:
+                - name
                 type: object
-                x-kubernetes-map-type: atomic
               resourceQuotaRef:
-                description: ResourceQuotaRef is a reference to the corev1.ResourceQuota
+                description: ResourceQuotaRef is a reference to the ResourceQuota
                   managed by this Workspace.
                 properties:
-                  apiVersion:
-                    description: API version of the referent.
-                    type: string
-                  fieldPath:
-                    description: |-
-                      If referring to a piece of an object instead of an entire object, this string
-                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                      For example, if the object reference is to a container within a pod, this would take on a value like:
-                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                      the event) or if no container name is specified "spec.containers[2]" (container with
-                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                      referencing a part of an object.
-                    type: string
-                  kind:
-                    description: |-
-                      Kind of the referent.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                    type: string
                   name:
-                    description: |-
-                      Name of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    description: Name is the name of the referenced resource.
                     type: string
                   namespace:
                     description: |-
-                      Namespace of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                      Namespace is the namespace of the referenced resource.
+                      Empty for cluster-scoped resources.
                     type: string
-                  resourceVersion:
-                    description: |-
-                      Specific resourceVersion to which this reference is made, if any.
-                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                    type: string
-                  uid:
-                    description: |-
-                      UID of the referent.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                    type: string
+                required:
+                - name
                 type: object
-                x-kubernetes-map-type: atomic
               roleBindingRefs:
                 description: RoleBindingRefs contains references to all RBAC RoleBindings
-                  created for the workspace users.
+                  created for the workspace members.
                 items:
-                  description: ObjectReference contains enough information to let
-                    you inspect or modify the referred object.
+                  description: |-
+                    ResourceReference is a lightweight reference to a Kubernetes resource managed by the operator.
+                    Unlike corev1.ObjectReference, it only contains the essential fields needed
+                    to identify the resource, avoiding stale UID/ResourceVersion issues.
                   properties:
-                    apiVersion:
-                      description: API version of the referent.
-                      type: string
-                    fieldPath:
-                      description: |-
-                        If referring to a piece of an object instead of an entire object, this string
-                        should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                        For example, if the object reference is to a container within a pod, this would take on a value like:
-                        "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                        the event) or if no container name is specified "spec.containers[2]" (container with
-                        index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                        referencing a part of an object.
-                      type: string
-                    kind:
-                      description: |-
-                        Kind of the referent.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                      type: string
                     name:
-                      description: |-
-                        Name of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      description: Name is the name of the referenced resource.
                       type: string
                     namespace:
                       description: |-
-                        Namespace of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                        Namespace is the namespace of the referenced resource.
+                        Empty for cluster-scoped resources.
                       type: string
-                    resourceVersion:
-                      description: |-
-                        Specific resourceVersion to which this reference is made, if any.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                      type: string
-                    uid:
-                      description: |-
-                        UID of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                      type: string
+                  required:
+                  - name
                   type: object
-                  x-kubernetes-map-type: atomic
                 type: array
-                x-kubernetes-list-type: atomic
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
             type: object
         required:
         - spec

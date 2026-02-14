@@ -17,71 +17,54 @@ limitations under the License.
 package tenant
 
 import (
+	"cmp"
 	"context"
 	"errors"
-	"fmt"
-	"maps"
-	"strings"
-	"time"
+	"slices"
 
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/discovery"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	istiosecurityv1 "istio.io/api/security/v1"
-	istiotypev1beta1 "istio.io/api/type/v1beta1"
 	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 )
-
-const UserLabelPrefix = "user.otterscale.io/"
-
-const (
-	workspaceRoleBindingName         = "workspace-role-binding"
-	workspaceResourceQuotaName       = "workspace-resource-quota"
-	workspaceLimitRangeName          = "workspace-limit-range"
-	workspaceNetworkPolicyName       = "workspace-network-policy"
-	workspacePeerAuthenticationName  = "workspace-peer-authentication"
-	workspaceAuthorizationPolicyName = "workspace-authorization-policy"
-
-	workspaceFinalizerName = "tenant.otterscale.io/workspace-finalizer"
-)
-
-type namespaceConflictError struct {
-	name string
-}
-
-func (e *namespaceConflictError) Error() string {
-	return fmt.Sprintf("namespace %s exists but is not owned by this workspace", e.name)
-}
 
 // WorkspaceReconciler reconciles a Workspace object.
 // It ensures that the underlying Namespace, RBAC roles, ResourceQuotas, and NetworkPolicies
 // match the desired state defined in the Workspace CR.
+//
+// The controller is intentionally kept thin: it orchestrates the reconciliation flow,
+// while the actual resource synchronization logic resides in internal/core/workspace/.
 type WorkspaceReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Version string
+	Scheme   *runtime.Scheme
+	Version  string
+	Recorder record.EventRecorder
 
-	istioEnabled bool
+	istioDetector *IstioDetector
 }
 
 // RBAC Permissions required by the controller:
 // +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=namespaces;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -90,79 +73,31 @@ type WorkspaceReconciler struct {
 // +kubebuilder:rbac:groups=security.istio.io,resources=authorizationpolicies;peerauthentications,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is the main loop for the controller.
-// It implements the level-triggered reconciliation logic.
+// It implements the level-triggered reconciliation logic with a thin orchestration pattern:
+// Fetch -> Domain Sync -> Status Update.
+//
+// Member-to-label synchronization is handled by the Mutating Webhook (WorkspaceCustomDefaulter),
+// ensuring labels are always consistent before the object reaches etcd.
+//
+// Deletion is handled entirely by Kubernetes garbage collection: all child resources
+// are created with OwnerReferences pointing to the Workspace, so they are automatically
+// cascade-deleted when the Workspace is removed. No finalizer is needed.
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithName(req.Name)
 	ctx = log.IntoContext(ctx, logger)
 
-	// Fetch the Workspace instance
+	// 1. Fetch the Workspace instance
 	var w tenantv1alpha1.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &w); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Handle deletion first to ensure finalizer-driven behavior is respected.
-	if !w.DeletionTimestamp.IsZero() {
-		return r.reconcileDeletion(ctx, &w)
+	// 2. Reconcile all domain resources
+	if err := r.reconcileResources(ctx, &w); err != nil {
+		return r.handleReconcileError(ctx, &w, err)
 	}
 
-	// Ensure finalizer is present for safe, explicit deletion handling.
-	if !ctrlutil.ContainsFinalizer(&w, workspaceFinalizerName) {
-		ctrlutil.AddFinalizer(&w, workspaceFinalizerName)
-		if err := r.Update(ctx, &w); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// 0. Reconcile Self Labels (Label Mirroring)
-	updated, err := r.reconcileUserLabels(ctx, &w)
-	if err != nil {
-		_ = r.setReadyConditionFalse(ctx, &w, "LabelSyncError", err.Error())
-		return ctrl.Result{}, err
-	}
-
-	if updated {
-		logger.Info("Workspace labels updated for user indexing, requeuing")
-		return ctrl.Result{}, nil
-	}
-
-	// 1. Reconcile Namespace (The foundation of the workspace)
-	if err := r.reconcileNamespace(ctx, &w); err != nil {
-		var nce *namespaceConflictError
-		if errors.As(err, &nce) {
-			_ = r.setReadyConditionFalse(ctx, &w, "NamespaceConflict", err.Error())
-		} else {
-			_ = r.setReadyConditionFalse(ctx, &w, "NamespaceError", err.Error())
-		}
-		return ctrl.Result{}, err
-	}
-
-	// 2. Reconcile RBAC RoleBindings (Bind users to roles)
-	if err := r.reconcileRoleBindings(ctx, &w); err != nil {
-		_ = r.setReadyConditionFalse(ctx, &w, "RBACError", err.Error())
-		return ctrl.Result{}, err
-	}
-
-	// 3. Reconcile ResourceQuota (Enforce hard limits on resources)
-	if err := r.reconcileResourceQuota(ctx, &w); err != nil {
-		_ = r.setReadyConditionFalse(ctx, &w, "ResourceQuotaError", err.Error())
-		return ctrl.Result{}, err
-	}
-
-	// 4. Reconcile LimitRange (Set default limits for pods)
-	if err := r.reconcileLimitRange(ctx, &w); err != nil {
-		_ = r.setReadyConditionFalse(ctx, &w, "LimitRangeError", err.Error())
-		return ctrl.Result{}, err
-	}
-
-	// 5. Reconcile Network Isolation (NetworkPolicy or Istio AuthzPolicy)
-	if err := r.reconcileNetworkIsolation(ctx, &w); err != nil {
-		_ = r.setReadyConditionFalse(ctx, &w, "NetworkIsolationError", err.Error())
-		return ctrl.Result{}, err
-	}
-
-	// 6. Update Status (Reflect the observed state back to the user)
+	// 3. Update Status (Reflect the observed state back to the user)
 	if err := r.updateStatus(ctx, &w); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -170,457 +105,190 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-func (r *WorkspaceReconciler) setReadyConditionFalse(ctx context.Context, w *tenantv1alpha1.Workspace, reason, message string) error {
+// reconcileResources orchestrates the domain-level resource sync in order.
+func (r *WorkspaceReconciler) reconcileResources(ctx context.Context, w *tenantv1alpha1.Workspace) error {
+	istioEnabled := r.istioDetector.IsEnabled()
+
+	if err := ws.ReconcileNamespace(ctx, r.Client, r.Scheme, w, r.Version, istioEnabled); err != nil {
+		return err
+	}
+	if err := ws.ReconcileRoleBindings(ctx, r.Client, r.Scheme, w, r.Version); err != nil {
+		return err
+	}
+	if err := ws.ReconcileResourceQuota(ctx, r.Client, r.Scheme, w, r.Version); err != nil {
+		return err
+	}
+	if err := ws.ReconcileLimitRange(ctx, r.Client, r.Scheme, w, r.Version); err != nil {
+		return err
+	}
+	return ws.ReconcileNetworkIsolation(ctx, r.Client, r.Scheme, w, r.Version, istioEnabled)
+}
+
+// handleReconcileError categorizes errors and updates status accordingly.
+// Permanent errors (e.g. namespace conflict) do NOT requeue to avoid infinite loops.
+// Transient errors are returned to the controller-runtime for exponential backoff retry.
+func (r *WorkspaceReconciler) handleReconcileError(ctx context.Context, w *tenantv1alpha1.Workspace, err error) (ctrl.Result, error) {
+	var nce *ws.NamespaceConflictError
+	if errors.As(err, &nce) {
+		// Permanent error: do not requeue, just update status
+		r.setReadyConditionFalse(ctx, w, "NamespaceConflict", err.Error())
+		r.Recorder.Event(w, corev1.EventTypeWarning, "NamespaceConflict", err.Error())
+		return ctrl.Result{}, nil
+	}
+
+	// Transient error: update status and requeue
+	r.setReadyConditionFalse(ctx, w, "ReconcileError", err.Error())
+	r.Recorder.Event(w, corev1.EventTypeWarning, "ReconcileError", err.Error())
+	return ctrl.Result{}, err
+}
+
+// setReadyConditionFalse updates the Ready condition to False via status patch.
+// Errors are logged rather than propagated to avoid masking the original reconcile error.
+func (r *WorkspaceReconciler) setReadyConditionFalse(ctx context.Context, w *tenantv1alpha1.Workspace, reason, message string) {
+	logger := log.FromContext(ctx)
+
+	patch := client.MergeFrom(w.DeepCopy())
 	meta.SetStatusCondition(&w.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               ws.ConditionTypeReady,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,
 		ObservedGeneration: w.Generation,
 	})
-	return r.Status().Update(ctx, w)
-}
+	w.Status.ObservedGeneration = w.Generation
 
-func (r *WorkspaceReconciler) reconcileDeletion(ctx context.Context, w *tenantv1alpha1.Workspace) (ctrl.Result, error) {
-	// Orphan the namespace: remove the OwnerReference so it is not garbage-collected.
-	if w.Spec.Namespace != "" {
-		var ns corev1.Namespace
-		if err := r.Get(ctx, types.NamespacedName{Name: w.Spec.Namespace}, &ns); err == nil {
-			newRefs := make([]metav1.OwnerReference, 0, len(ns.OwnerReferences))
-			for _, ref := range ns.OwnerReferences {
-				if ref.UID != w.UID {
-					newRefs = append(newRefs, ref)
-				}
-			}
-			if len(newRefs) != len(ns.OwnerReferences) {
-				ns.OwnerReferences = newRefs
-				if err := r.Update(ctx, &ns); err != nil {
-					return ctrl.Result{}, err
-				}
-			}
-		} else if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
+	if err := r.Status().Patch(ctx, w, patch); err != nil {
+		logger.Error(err, "Failed to patch Ready=False status condition", "reason", reason)
 	}
-
-	ctrlutil.RemoveFinalizer(w, workspaceFinalizerName)
-	if err := r.Update(ctx, w); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
 }
 
 // SetupWithManager registers the controller with the Manager and defines watches.
-func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
-	r.istioEnabled, err = checkIstioEnabled(mgr.GetConfig())
-	if err != nil {
-		return err
-	}
+//
+// Istio detection is handled dynamically: the controller watches CustomResourceDefinition
+// objects filtered to the security.istio.io group. When an Istio CRD is created or deleted,
+// the IstioDetector refreshes its state and all Workspaces are re-enqueued so the
+// reconciler can adapt (e.g. switch between NetworkPolicy and Istio AuthorizationPolicy).
+//
+// If Istio CRDs are already present at startup, the controller also registers Owns()
+// watches for PeerAuthentication and AuthorizationPolicy to detect external drift.
+func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.istioDetector = NewIstioDetector(mgr.GetConfig())
 
-	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&tenantv1alpha1.Workspace{}).
+	b := ctrl.NewControllerManagedBy(mgr).
+		For(&tenantv1alpha1.Workspace{},
+			// Filter out status-only updates: only reconcile on spec changes (generation bump).
+			// Label synchronization is handled by the mutating webhook, so we no longer need
+			// to watch for label changes.
+			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
 		// Watch for changes in owned resources to trigger reconciliation
 		Owns(&corev1.Namespace{}).
 		Owns(&corev1.ResourceQuota{}).
 		Owns(&corev1.LimitRange{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		// Watch CRD changes to detect Istio installation or removal at runtime.
+		// When an Istio CRD event fires, mapCRDToWorkspaces refreshes the detector
+		// and enqueues every Workspace for re-reconciliation.
+		Watches(
+			&apiextensionsv1.CustomResourceDefinition{},
+			handler.EnqueueRequestsFromMapFunc(r.mapCRDToWorkspaces),
+			builder.WithPredicates(istioCRDPredicate()),
+		).
 		Named("workspace")
 
-	if r.istioEnabled {
-		builder.Owns(&istioapisecurityv1.PeerAuthentication{})
-		builder.Owns(&istioapisecurityv1.AuthorizationPolicy{})
-	} else {
-		poller := &IstioPoller{
-			Config:   mgr.GetConfig(),
-			Interval: 15 * time.Minute,
-		}
-		if err := mgr.Add(poller); err != nil {
-			return err
-		}
+	// If Istio is already available at startup, also watch owned Istio resources
+	// so that external drift (e.g. manual deletion) is detected immediately.
+	//
+	// Known limitation: if Istio is installed *after* the operator starts,
+	// these Owns() watches will NOT be registered because controller-runtime
+	// does not support adding watches dynamically after the controller starts.
+	// The CRD watcher above will still detect the installation and re-enqueue
+	// all Workspaces to create the Istio resources, but subsequent external
+	// drift on those Istio resources (e.g. someone manually deletes a
+	// PeerAuthentication) will not trigger reconciliation until the operator
+	// is restarted. Restarting the operator resolves this, as Istio CRDs will
+	// then be present at startup and the Owns() watches will be registered.
+	if r.istioDetector.IsEnabled() {
+		b.Owns(&istioapisecurityv1.PeerAuthentication{})
+		b.Owns(&istioapisecurityv1.AuthorizationPolicy{})
 	}
 
-	return builder.Complete(r)
+	return b.Complete(r)
 }
 
-// reconcileUserLabels ensures that the Workspace has labels for each user in its spec.
-func (r *WorkspaceReconciler) reconcileUserLabels(ctx context.Context, w *tenantv1alpha1.Workspace) (bool, error) {
-	newLabels := maps.Clone(w.GetLabels())
-	if newLabels == nil {
-		newLabels = make(map[string]string)
+// mapCRDToWorkspaces is called when an Istio-related CRD is created or deleted.
+// It refreshes the IstioDetector and enqueues all Workspace objects for re-reconciliation.
+func (r *WorkspaceReconciler) mapCRDToWorkspaces(ctx context.Context, _ client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx).WithName("crd-watch")
+
+	r.istioDetector.Refresh()
+	logger.Info("Istio CRD change detected, re-enqueuing all Workspaces",
+		"istioEnabled", r.istioDetector.IsEnabled())
+
+	var workspaces tenantv1alpha1.WorkspaceList
+	if err := r.List(ctx, &workspaces); err != nil {
+		logger.Error(err, "Failed to list Workspaces for CRD change re-enqueue")
+		return nil
 	}
 
-	desiredUserLabels := make(map[string]struct{})
-	for _, user := range w.Spec.Users {
-		key := UserLabelPrefix + user.Subject
-		desiredUserLabels[key] = struct{}{}
-	}
-
-	for k := range newLabels {
-		if strings.HasPrefix(k, UserLabelPrefix) {
-			if _, wanted := desiredUserLabels[k]; !wanted {
-				delete(newLabels, k)
-			}
+	requests := make([]reconcile.Request, len(workspaces.Items))
+	for i, w := range workspaces.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: w.Name},
 		}
 	}
-
-	for k := range desiredUserLabels {
-		newLabels[k] = "true"
-	}
-
-	if maps.Equal(w.GetLabels(), newLabels) {
-		return false, nil
-	}
-
-	w.SetLabels(newLabels)
-
-	if err := r.Update(ctx, w); err != nil {
-		return false, err
-	}
-	return true, nil
+	return requests
 }
 
-// reconcileNamespace ensures the Namespace exists and is properly labeled.
-func (r *WorkspaceReconciler) reconcileNamespace(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	namespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: w.Spec.Namespace,
-		},
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, namespace, func() error {
-		// Safety check: Prevent taking over existing namespaces not owned by us
-		if !isOwned(namespace.OwnerReferences, w.UID) && !namespace.CreationTimestamp.IsZero() {
-			return &namespaceConflictError{name: namespace.Name}
+// istioCRDPredicate filters CRD events to only those belonging to the security.istio.io group.
+func istioCRDPredicate() predicate.Predicate {
+	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		crd, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
+		if !ok {
+			return false
 		}
-
-		if namespace.Labels == nil {
-			namespace.Labels = map[string]string{}
-		}
-
-		maps.Copy(namespace.Labels, labelsForWorkspace(w.Name, r.Version))
-
-		// Enable Istio sidecar injection if Istio is detected
-		if r.istioEnabled {
-			namespace.Labels["istio-injection"] = "enabled"
-		}
-
-		// Set OwnerReference to ensure garbage collection works
-		return ctrlutil.SetControllerReference(w, namespace, r.Scheme)
+		return crd.Spec.Group == "security.istio.io"
 	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("Namespace reconciled", "operation", op, "name", namespace.Name)
-	}
-	return nil
 }
 
-// reconcileRoleBindings groups users by role and creates the necessary bindings.
-func (r *WorkspaceReconciler) reconcileRoleBindings(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	// Map roles to lists of users for efficient processing
-	usersByRole := make(map[tenantv1alpha1.WorkspaceUserRole][]tenantv1alpha1.WorkspaceUser)
-
-	for _, user := range w.Spec.Users {
-		usersByRole[user.Role] = append(usersByRole[user.Role], user)
-	}
-
-	// Reconcile bindings for each known role
-	roles := []tenantv1alpha1.WorkspaceUserRole{
-		tenantv1alpha1.WorkspaceUserRoleAdmin,
-		tenantv1alpha1.WorkspaceUserRoleEdit,
-		tenantv1alpha1.WorkspaceUserRoleView,
-	}
-
-	for _, role := range roles {
-		if err := r.reconcileRoleBinding(ctx, w, role, usersByRole[role]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// reconcileRoleBinding manages the binding between a Role and a list of Users.
-// It deletes the binding if there are no users for that role.
-func (r *WorkspaceReconciler) reconcileRoleBinding(ctx context.Context, w *tenantv1alpha1.Workspace, role tenantv1alpha1.WorkspaceUserRole, users []tenantv1alpha1.WorkspaceUser) error {
-	binding := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workspaceRoleBindingName + "-" + string(role),
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	// Clean up if no users have this role
-	if len(users) == 0 {
-		return client.IgnoreNotFound(r.Delete(ctx, binding))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, binding, func() error {
-		binding.Labels = labelsForWorkspace(w.Name, r.Version)
-		binding.Subjects = []rbacv1.Subject{}
-		for _, u := range users {
-			binding.Subjects = append(binding.Subjects, rbacv1.Subject{
-				Kind:     rbacv1.UserKind,
-				APIGroup: rbacv1.GroupName,
-				Name:     u.Subject,
-			})
-		}
-		binding.RoleRef = rbacv1.RoleRef{
-			Kind:     "ClusterRole",
-			APIGroup: rbacv1.GroupName,
-			Name:     string(role),
-		}
-		return ctrlutil.SetControllerReference(w, binding, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("RoleBinding reconciled", "operation", op, "name", binding.Name)
-	}
-	return nil
-}
-
-// reconcileResourceQuota applies quota constraints if defined.
-func (r *WorkspaceReconciler) reconcileResourceQuota(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	quota := &corev1.ResourceQuota{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workspaceResourceQuotaName,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if w.Spec.ResourceQuota == nil {
-		return client.IgnoreNotFound(r.Delete(ctx, quota))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, quota, func() error {
-		quota.Labels = labelsForWorkspace(w.Name, r.Version)
-		quota.Spec = *w.Spec.ResourceQuota
-		return ctrlutil.SetControllerReference(w, quota, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("ResourceQuota reconciled", "operation", op, "name", quota.Name)
-	}
-	return nil
-}
-
-// reconcileLimitRange applies default limits if defined.
-func (r *WorkspaceReconciler) reconcileLimitRange(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	limits := &corev1.LimitRange{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workspaceLimitRangeName,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if w.Spec.LimitRange == nil {
-		return client.IgnoreNotFound(r.Delete(ctx, limits))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, limits, func() error {
-		limits.Labels = labelsForWorkspace(w.Name, r.Version)
-		limits.Spec = *w.Spec.LimitRange
-		return ctrlutil.SetControllerReference(w, limits, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("LimitRange reconciled", "operation", op, "name", limits.Name)
-	}
-	return nil
-}
-
-// reconcileNetworkIsolation decides whether to use Istio or standard NetworkPolicy.
-func (r *WorkspaceReconciler) reconcileNetworkIsolation(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	if err := r.reconcileNetworkPolicy(ctx, w); err != nil {
-		return err
-	}
-	if err := r.reconcilePeerAuthentication(ctx, w); err != nil {
-		return err
-	}
-	return r.reconcileAuthorizationPolicy(ctx, w)
-}
-
-// reconcileNetworkPolicy creates K8s NetworkPolicies for environments without Istio.
-func (r *WorkspaceReconciler) reconcileNetworkPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	policy := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workspaceNetworkPolicyName,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if !w.Spec.NetworkIsolation.Enabled || r.istioEnabled {
-		return client.IgnoreNotFound(r.Delete(ctx, policy))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = labelsForWorkspace(w.Name, r.Version)
-
-		// Rule 1: Allow traffic from within the same namespace
-		ingressRules := []networkingv1.NetworkPolicyIngressRule{
-			{
-				From: []networkingv1.NetworkPolicyPeer{
-					{
-						PodSelector: &metav1.LabelSelector{}, // Empty selector means all pods in this namespace
-					},
-				},
-			},
-		}
-
-		// Rule 2: Allow traffic from allowed namespaces
-		for _, namespace := range w.Spec.NetworkIsolation.AllowedNamespaces {
-			ingressRules = append(ingressRules, networkingv1.NetworkPolicyIngressRule{
-				From: []networkingv1.NetworkPolicyPeer{
-					{
-						NamespaceSelector: &metav1.LabelSelector{
-							MatchLabels: map[string]string{
-								"kubernetes.io/metadata.name": namespace,
-							},
-						},
-					},
-				},
-			})
-		}
-
-		policy.Spec = networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{}, // Apply to all pods
-			PolicyTypes: []networkingv1.PolicyType{
-				networkingv1.PolicyTypeIngress,
-			},
-			Ingress: ingressRules,
-		}
-		return ctrlutil.SetControllerReference(w, policy, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("NetworkPolicy reconciled", "operation", op, "name", policy.Name)
-	}
-	return nil
-}
-
-// reconcilePeerAuthentication enables strict mTLS when network isolation is enabled in Istio.
-func (r *WorkspaceReconciler) reconcilePeerAuthentication(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	peer := &istioapisecurityv1.PeerAuthentication{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workspacePeerAuthenticationName,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
-		return ignoreNoMatchNotFound(r.Delete(ctx, peer))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, peer, func() error {
-		peer.Labels = labelsForWorkspace(w.Name, r.Version)
-		peer.Spec = istiosecurityv1.PeerAuthentication{
-			Selector: &istiotypev1beta1.WorkloadSelector{MatchLabels: map[string]string{}},
-			Mtls: &istiosecurityv1.PeerAuthentication_MutualTLS{
-				Mode: istiosecurityv1.PeerAuthentication_MutualTLS_STRICT,
-			},
-		}
-		return ctrlutil.SetControllerReference(w, peer, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("PeerAuthentication reconciled", "operation", op, "name", peer.Name)
-	}
-	return nil
-}
-
-// reconcileAuthorizationPolicy creates Istio AuthorizationPolicies for network isolation.
-func (r *WorkspaceReconciler) reconcileAuthorizationPolicy(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	policy := &istioapisecurityv1.AuthorizationPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      workspaceAuthorizationPolicyName,
-			Namespace: w.Spec.Namespace,
-		},
-	}
-
-	if !w.Spec.NetworkIsolation.Enabled || !r.istioEnabled {
-		return ignoreNoMatchNotFound(r.Delete(ctx, policy))
-	}
-
-	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, policy, func() error {
-		policy.Labels = labelsForWorkspace(w.Name, r.Version)
-
-		allowedNamespaces := []string{w.Spec.Namespace} // Always allow traffic within the workspace
-		allowedNamespaces = append(allowedNamespaces, w.Spec.NetworkIsolation.AllowedNamespaces...)
-
-		policy.Spec = istiosecurityv1.AuthorizationPolicy{
-			Selector: &istiotypev1beta1.WorkloadSelector{
-				MatchLabels: map[string]string{}, // Apply to all workloads
-			},
-			Rules: []*istiosecurityv1.Rule{
-				{
-					From: []*istiosecurityv1.Rule_From{
-						{
-							Source: &istiosecurityv1.Source{
-								Namespaces: allowedNamespaces,
-							},
-						},
-					},
-				},
-			},
-			Action: istiosecurityv1.AuthorizationPolicy_ALLOW,
-		}
-		return ctrlutil.SetControllerReference(w, policy, r.Scheme)
-	})
-	if err != nil {
-		return err
-	}
-	if op != ctrlutil.OperationResultNone {
-		log.FromContext(ctx).Info("AuthorizationPolicy reconciled", "operation", op, "name", policy.Name)
-	}
-	return nil
-}
-
-// updateStatus calculates the status based on the current state and updates the resource.
+// updateStatus calculates the status based on the current observed state and patches the resource.
 func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha1.Workspace) error {
-	// Deep copy to avoid mutating the fetched object
 	newStatus := w.Status.DeepCopy()
+	newStatus.ObservedGeneration = w.Generation
 
 	// Update Namespace reference
-	newStatus.NamespaceRef = &corev1.ObjectReference{
-		APIVersion: corev1.SchemeGroupVersion.String(),
-		Kind:       "Namespace",
-		Name:       w.Spec.Namespace,
+	newStatus.NamespaceRef = &tenantv1alpha1.ResourceReference{
+		Name: w.Spec.Namespace,
 	}
 
-	// Update RoleBindings references
-	rolesInUse := map[tenantv1alpha1.WorkspaceUserRole]bool{}
-	for _, u := range w.Spec.Users {
-		rolesInUse[u.Role] = true
+	// Update RoleBindings references (deterministic order to prevent status flapping)
+	rolesInUse := make(map[tenantv1alpha1.MemberRole]bool)
+	for _, m := range w.Spec.Members {
+		rolesInUse[m.Role] = true
 	}
 
-	newStatus.RoleBindingRefs = []corev1.ObjectReference{}
-	for role := range rolesInUse {
-		newStatus.RoleBindingRefs = append(newStatus.RoleBindingRefs, corev1.ObjectReference{
-			APIVersion: rbacv1.SchemeGroupVersion.String(),
-			Kind:       "RoleBinding",
-			Name:       workspaceRoleBindingName + "-" + string(role),
-			Namespace:  w.Spec.Namespace,
-		})
+	// Build refs in deterministic order: admin, edit, view
+	orderedRoles := []tenantv1alpha1.MemberRole{
+		tenantv1alpha1.MemberRoleAdmin,
+		tenantv1alpha1.MemberRoleEdit,
+		tenantv1alpha1.MemberRoleView,
+	}
+	newStatus.RoleBindingRefs = nil
+	for _, role := range orderedRoles {
+		if rolesInUse[role] {
+			newStatus.RoleBindingRefs = append(newStatus.RoleBindingRefs, tenantv1alpha1.ResourceReference{
+				Name:      ws.RoleBindingName + "-" + string(role),
+				Namespace: w.Spec.Namespace,
+			})
+		}
 	}
 
 	// Update ResourceQuota reference
 	if w.Spec.ResourceQuota != nil {
-		newStatus.ResourceQuotaRef = &corev1.ObjectReference{
-			APIVersion: corev1.SchemeGroupVersion.String(),
-			Kind:       "ResourceQuota",
-			Name:       workspaceResourceQuotaName,
-			Namespace:  w.Spec.Namespace,
+		newStatus.ResourceQuotaRef = &tenantv1alpha1.ResourceReference{
+			Name:      ws.ResourceQuotaName,
+			Namespace: w.Spec.Namespace,
 		}
 	} else {
 		newStatus.ResourceQuotaRef = nil
@@ -628,11 +296,9 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 
 	// Update LimitRange reference
 	if w.Spec.LimitRange != nil {
-		newStatus.LimitRangeRef = &corev1.ObjectReference{
-			APIVersion: corev1.SchemeGroupVersion.String(),
-			Kind:       "LimitRange",
-			Name:       workspaceLimitRangeName,
-			Namespace:  w.Spec.Namespace,
+		newStatus.LimitRangeRef = &tenantv1alpha1.ResourceReference{
+			Name:      ws.LimitRangeName,
+			Namespace: w.Spec.Namespace,
 		}
 	} else {
 		newStatus.LimitRangeRef = nil
@@ -640,26 +306,20 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 
 	// Update Network Isolation resources
 	if w.Spec.NetworkIsolation.Enabled {
-		if r.istioEnabled {
+		if r.istioDetector.IsEnabled() {
 			newStatus.NetworkPolicyRef = nil
-			newStatus.PeerAuthenticationRef = &corev1.ObjectReference{
-				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
-				Kind:       "PeerAuthentication",
-				Name:       workspacePeerAuthenticationName,
-				Namespace:  w.Spec.Namespace,
+			newStatus.PeerAuthenticationRef = &tenantv1alpha1.ResourceReference{
+				Name:      ws.PeerAuthenticationName,
+				Namespace: w.Spec.Namespace,
 			}
-			newStatus.AuthorizationPolicyRef = &corev1.ObjectReference{
-				APIVersion: istioapisecurityv1.SchemeGroupVersion.String(),
-				Kind:       "AuthorizationPolicy",
-				Name:       workspaceAuthorizationPolicyName,
-				Namespace:  w.Spec.Namespace,
+			newStatus.AuthorizationPolicyRef = &tenantv1alpha1.ResourceReference{
+				Name:      ws.AuthorizationPolicyName,
+				Namespace: w.Spec.Namespace,
 			}
 		} else {
-			newStatus.NetworkPolicyRef = &corev1.ObjectReference{
-				APIVersion: networkingv1.SchemeGroupVersion.String(),
-				Kind:       "NetworkPolicy",
-				Name:       workspaceNetworkPolicyName,
-				Namespace:  w.Spec.Namespace,
+			newStatus.NetworkPolicyRef = &tenantv1alpha1.ResourceReference{
+				Name:      ws.NetworkPolicyName,
+				Namespace: w.Spec.Namespace,
 			}
 			newStatus.PeerAuthenticationRef = nil
 			newStatus.AuthorizationPolicyRef = nil
@@ -672,60 +332,29 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 
 	// Set Ready condition
 	meta.SetStatusCondition(&newStatus.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               ws.ConditionTypeReady,
 		Status:             metav1.ConditionTrue,
 		Reason:             "Reconciled",
 		Message:            "Workspace resources are successfully reconciled",
 		ObservedGeneration: w.Generation,
 	})
 
+	// Sort conditions by type for stable ordering
+	slices.SortFunc(newStatus.Conditions, func(a, b metav1.Condition) int {
+		return cmp.Compare(a.Type, b.Type)
+	})
+
 	// Check for changes before making an API call to reduce load on the API server
 	if !equality.Semantic.DeepEqual(w.Status, *newStatus) {
+		patch := client.MergeFrom(w.DeepCopy())
 		w.Status = *newStatus
-		if err := r.Status().Update(ctx, w); err != nil {
+		if err := r.Status().Patch(ctx, w, patch); err != nil {
 			return err
 		}
 		log.FromContext(ctx).Info("Workspace status updated")
+		r.Recorder.Eventf(w, corev1.EventTypeNormal, "Reconciled",
+			"Workspace resources reconciled for namespace %s", w.Spec.Namespace)
 	}
 
 	return nil
-}
-
-// labelsForWorkspace returns a standard set of labels for resources managed by this operator.
-func labelsForWorkspace(workspace, version string) map[string]string {
-	return map[string]string{
-		"app.kubernetes.io/name":       "workspace",
-		"app.kubernetes.io/instance":   workspace,
-		"app.kubernetes.io/version":    version,
-		"app.kubernetes.io/component":  "workspace",
-		"app.kubernetes.io/part-of":    "otterscale",
-		"app.kubernetes.io/managed-by": "otterscale-operator",
-	}
-}
-
-// isResourceSupported checks if CRD exist in the cluster.
-// This allows the controller to adapt its behavior based on the environment.
-func isResourceSupported(dc *discovery.DiscoveryClient, groupVersion string) bool {
-	if _, err := dc.ServerResourcesForGroupVersion(groupVersion); err != nil {
-		return false
-	}
-	return true
-}
-
-// isOwned checks if the object is owned by the given UID to prevent adoption conflicts.
-func isOwned(refs []metav1.OwnerReference, uid types.UID) bool {
-	for _, ref := range refs {
-		if ref.UID == uid {
-			return true
-		}
-	}
-	return false
-}
-
-// ignoreNoMatchNotFound ignores NoMatch errors and NotFound errors.
-func ignoreNoMatchNotFound(err error) error {
-	if meta.IsNoMatchError(err) {
-		return nil
-	}
-	return client.IgnoreNotFound(err)
 }

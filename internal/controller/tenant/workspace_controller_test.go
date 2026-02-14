@@ -32,10 +32,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 )
 
 var _ = Describe("Workspace Controller", func() {
@@ -57,19 +59,19 @@ var _ = Describe("Workspace Controller", func() {
 	// --- Helpers ---
 
 	makeWorkspace := func(name, namespace string, mods ...func(*tenantv1alpha1.Workspace)) *tenantv1alpha1.Workspace {
-		ws := &tenantv1alpha1.Workspace{
+		w := &tenantv1alpha1.Workspace{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Spec: tenantv1alpha1.WorkspaceSpec{
 				Namespace: namespace,
-				Users: []tenantv1alpha1.WorkspaceUser{
-					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+				Members: []tenantv1alpha1.WorkspaceMember{
+					{Role: tenantv1alpha1.MemberRoleAdmin, Subject: adminUser},
 				},
 			},
 		}
 		for _, mod := range mods {
-			mod(ws)
+			mod(w)
 		}
-		return ws
+		return w
 	}
 
 	executeReconcile := func() {
@@ -79,9 +81,7 @@ var _ = Describe("Workspace Controller", func() {
 	}
 
 	fullyReconcile := func() {
-		executeReconcile() // 1) adds finalizer
-		executeReconcile() // 2) syncs user labels
-		executeReconcile() // 3) provisions resources + updates status
+		executeReconcile() // provisions resources + updates status
 	}
 
 	fetchResource := func(obj client.Object, name, namespace string) {
@@ -98,9 +98,10 @@ var _ = Describe("Workspace Controller", func() {
 		resourceName = string(uuid.NewUUID())
 		namespaceName = string(uuid.NewUUID())
 		reconciler = &WorkspaceReconciler{
-			Client:       k8sClient,
-			Scheme:       k8sClient.Scheme(),
-			istioEnabled: false,
+			Client:        k8sClient,
+			Scheme:        k8sClient.Scheme(),
+			Recorder:      record.NewFakeRecorder(100),
+			istioDetector: &IstioDetector{}, // defaults to disabled (no Istio in envtest)
 		}
 		workspace = makeWorkspace(resourceName, namespaceName)
 	})
@@ -114,8 +115,6 @@ var _ = Describe("Workspace Controller", func() {
 		if err := k8sClient.Get(ctx, nsName, workspace); err == nil {
 			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
 			Eventually(func() bool {
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-				Expect(err).NotTo(HaveOccurred())
 				return errors.IsNotFound(k8sClient.Get(ctx, nsName, workspace))
 			}, timeout, interval).Should(BeTrue())
 		}
@@ -134,7 +133,7 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying the Admin RoleBinding")
 			var rb rbacv1.RoleBinding
-			fetchResource(&rb, workspaceRoleBindingName+"-admin", namespaceName)
+			fetchResource(&rb, ws.RoleBindingName+"-admin", namespaceName)
 			Expect(rb.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(adminUser))))
 
 			By("Verifying status updates")
@@ -154,15 +153,10 @@ var _ = Describe("Workspace Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: namespaceName},
 			})).To(Succeed())
 
-			By("Running reconciliation until it hits the namespace conflict")
+			By("Running reconciliation - namespace conflict is a permanent error: should NOT return error (no requeue)")
 			nsName := types.NamespacedName{Name: resourceName}
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-			Expect(err).NotTo(HaveOccurred()) // add finalizer
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-			Expect(err).NotTo(HaveOccurred()) // sync labels
-
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-			Expect(err).To(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying the status condition is updated")
 			fetchResource(workspace, resourceName, "")
@@ -175,11 +169,11 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Resource Management", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
-				ws.Spec.ResourceQuota = &corev1.ResourceQuotaSpec{
+			workspace = makeWorkspace(resourceName, namespaceName, func(w *tenantv1alpha1.Workspace) {
+				w.Spec.ResourceQuota = &corev1.ResourceQuotaSpec{
 					Hard: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")},
 				}
-				ws.Spec.LimitRange = &corev1.LimitRangeSpec{
+				w.Spec.LimitRange = &corev1.LimitRangeSpec{
 					Limits: []corev1.LimitRangeItem{{
 						Type:    corev1.LimitTypeContainer,
 						Default: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")},
@@ -193,11 +187,11 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying creation")
 			var quota corev1.ResourceQuota
-			fetchResource(&quota, workspaceResourceQuotaName, namespaceName)
+			fetchResource(&quota, ws.ResourceQuotaName, namespaceName)
 			Expect(quota.Spec.Hard[corev1.ResourcePods]).To(Equal(resource.MustParse("10")))
 
 			var limit corev1.LimitRange
-			fetchResource(&limit, workspaceLimitRangeName, namespaceName)
+			fetchResource(&limit, ws.LimitRangeName, namespaceName)
 			Expect(limit.Spec.Limits[0].Default[corev1.ResourceCPU]).To(Equal(resource.MustParse("500m")))
 
 			By("Updating Spec to remove constraints")
@@ -209,15 +203,15 @@ var _ = Describe("Workspace Controller", func() {
 			executeReconcile()
 
 			By("Verifying deletion")
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceResourceQuotaName, Namespace: namespaceName}, &quota))).To(BeTrue())
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceLimitRangeName, Namespace: namespaceName}, &limit))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: ws.ResourceQuotaName, Namespace: namespaceName}, &quota))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: ws.LimitRangeName, Namespace: namespaceName}, &limit))).To(BeTrue())
 		})
 	})
 
 	Context("Network Isolation", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
-				ws.Spec.NetworkIsolation = tenantv1alpha1.WorkspaceNetworkIsolation{
+			workspace = makeWorkspace(resourceName, namespaceName, func(w *tenantv1alpha1.Workspace) {
+				w.Spec.NetworkIsolation = tenantv1alpha1.NetworkIsolationSpec{
 					Enabled:           true,
 					AllowedNamespaces: []string{"kube-system"},
 				}
@@ -229,27 +223,27 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Verifying NetworkPolicy creation")
 			var netpol networkingv1.NetworkPolicy
-			fetchResource(&netpol, workspaceNetworkPolicyName, namespaceName)
+			fetchResource(&netpol, ws.NetworkPolicyName, namespaceName)
 			Expect(netpol.Spec.Ingress).NotTo(BeEmpty())
 
 			By("Disabling NetworkIsolation")
 			fetchResource(workspace, resourceName, "")
-			workspace.Spec.NetworkIsolation.Enabled = false
+			workspace.Spec.NetworkIsolation = tenantv1alpha1.NetworkIsolationSpec{}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
 			executeReconcile()
 
 			By("Verifying NetworkPolicy deletion")
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceNetworkPolicyName, Namespace: namespaceName}, &netpol))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: ws.NetworkPolicyName, Namespace: namespaceName}, &netpol))).To(BeTrue())
 		})
 	})
 
-	Context("RBAC & Multi-User Support", func() {
+	Context("RBAC & Multi-Member Support", func() {
 		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
-				ws.Spec.Users = []tenantv1alpha1.WorkspaceUser{
-					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
-					{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: viewUser},
+			workspace = makeWorkspace(resourceName, namespaceName, func(w *tenantv1alpha1.Workspace) {
+				w.Spec.Members = []tenantv1alpha1.WorkspaceMember{
+					{Role: tenantv1alpha1.MemberRoleAdmin, Subject: adminUser},
+					{Role: tenantv1alpha1.MemberRoleView, Subject: viewUser},
 				}
 			})
 		})
@@ -259,20 +253,20 @@ var _ = Describe("Workspace Controller", func() {
 
 			By("Checking View RoleBinding")
 			var viewBinding rbacv1.RoleBinding
-			fetchResource(&viewBinding, workspaceRoleBindingName+"-view", namespaceName)
+			fetchResource(&viewBinding, ws.RoleBindingName+"-view", namespaceName)
 			Expect(viewBinding.Subjects).To(ContainElement(WithTransform(func(s rbacv1.Subject) string { return s.Name }, Equal(viewUser))))
 
-			By("Removing View User")
+			By("Removing View Member")
 			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
-				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
+			workspace.Spec.Members = []tenantv1alpha1.WorkspaceMember{
+				{Role: tenantv1alpha1.MemberRoleAdmin, Subject: adminUser},
 			}
 			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
 
 			fullyReconcile()
 
 			By("Verifying View RoleBinding is gone")
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: workspaceRoleBindingName + "-view", Namespace: namespaceName}, &viewBinding))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: ws.RoleBindingName + "-view", Namespace: namespaceName}, &viewBinding))).To(BeTrue())
 		})
 	})
 
@@ -305,139 +299,9 @@ var _ = Describe("Workspace Controller", func() {
 		})
 	})
 
-	Context("User Label Synchronization", func() {
-		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
-				ws.Spec.Users = []tenantv1alpha1.WorkspaceUser{
-					{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
-					{Role: tenantv1alpha1.WorkspaceUserRoleView, Subject: viewUser},
-				}
-			})
-		})
-
-		It("should mirror user subjects as labels and preserve custom labels", func() {
-			By("Adding a custom label to the workspace before reconciliation")
-			fetchResource(workspace, resourceName, "")
-			if workspace.Labels == nil {
-				workspace.Labels = make(map[string]string)
-			}
-			workspace.Labels["my-custom-label"] = "my-custom-value"
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-			executeReconcile()
-
-			By("Fetching the reconciled Workspace")
-			fetchResource(workspace, resourceName, "")
-
-			By("Verifying user labels are created")
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
-
-			By("Verifying the custom label is preserved")
-			Expect(workspace.Labels).To(HaveKeyWithValue("my-custom-label", "my-custom-value"))
-		})
-
-		It("should update labels when users are added", func() {
-			executeReconcile()
-			executeReconcile()
-
-			By("Adding a new user")
-			newUser := "editor-user"
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Users = append(workspace.Spec.Users, tenantv1alpha1.WorkspaceUser{
-				Role:    tenantv1alpha1.WorkspaceUserRoleEdit,
-				Subject: newUser,
-			})
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-
-			By("Verifying new user label is added")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+viewUser, "true"))
-		})
-
-		It("should update labels when users are removed", func() {
-			executeReconcile()
-			executeReconcile()
-
-			By("Removing the view user")
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
-				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: adminUser},
-			}
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-
-			By("Verifying removed user label is gone")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+adminUser, "true"))
-			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + viewUser))
-		})
-
-		It("should update labels when user list is completely replaced", func() {
-			executeReconcile()
-			executeReconcile()
-
-			By("Replacing all users")
-			newUser1 := "new-admin"
-			newUser2 := "new-editor"
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
-				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: newUser1},
-				{Role: tenantv1alpha1.WorkspaceUserRoleEdit, Subject: newUser2},
-			}
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-
-			By("Verifying labels reflect new users only")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser1, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+newUser2, "true"))
-			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + adminUser))
-			Expect(workspace.Labels).NotTo(HaveKey(UserLabelPrefix + viewUser))
-		})
-
-		It("should handle users with special characters in their subject", func() {
-			specialUser := "user.example.com"
-			By("Updating workspace with special user")
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Users = []tenantv1alpha1.WorkspaceUser{
-				{Role: tenantv1alpha1.WorkspaceUserRoleAdmin, Subject: specialUser},
-			}
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-			executeReconcile()
-
-			By("Verifying special character handling")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(UserLabelPrefix+specialUser, "true"))
-		})
-
-		It("should not cause infinite reconciliation loops", func() {
-			fullyReconcile()
-
-			By("Getting the labels after full reconciliation")
-			fetchResource(workspace, resourceName, "")
-			firstLabels := workspace.Labels
-
-			executeReconcile()
-
-			By("Verifying labels are stable after third reconcile")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(Equal(firstLabels))
-		})
-	})
-
-	Context("Internal Helpers", func() {
+	Context("Domain Helpers", func() {
 		It("should generate correct labels", func() {
-			labels := labelsForWorkspace("workspace-name", "v1")
+			labels := ws.LabelsForWorkspace("workspace-name", "v1")
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/name", "workspace"))
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/instance", "workspace-name"))
 			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/version", "v1"))
@@ -449,8 +313,8 @@ var _ = Describe("Workspace Controller", func() {
 		It("should check ownership correctly", func() {
 			uid := types.UID("12345")
 			refs := []metav1.OwnerReference{{UID: uid}}
-			Expect(isOwned(refs, uid)).To(BeTrue())
-			Expect(isOwned(refs, "other")).To(BeFalse())
+			Expect(ws.IsOwned(refs, uid)).To(BeTrue())
+			Expect(ws.IsOwned(refs, "other")).To(BeFalse())
 		})
 	})
 })

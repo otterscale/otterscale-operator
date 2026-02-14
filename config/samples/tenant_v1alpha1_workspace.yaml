@@ -7,7 +7,7 @@ metadata:
   name: workspace-sample
 spec:
   namespace: "this-is-user-namespace"
-  users:
+  members:
     - name: "aaa"
       subject: "aaa"
       role: "admin"

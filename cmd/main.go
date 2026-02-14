@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"cmp"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -36,9 +37,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	tenantcontroller "github.com/otterscale/otterscale-operator/internal/controller/tenant"
+	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
+	webhooktenantv1alpha1 "github.com/otterscale/otterscale-operator/internal/webhook/tenant/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -50,6 +54,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 	utilruntime.Must(istioapisecurityv1.AddToScheme(scheme))
 	utilruntime.Must(tenantv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
@@ -182,12 +187,28 @@ func main() {
 	}
 
 	if err := (&tenantcontroller.WorkspaceReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Version: version,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Version:  version,
+		Recorder: mgr.GetEventRecorderFor("workspace-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)
+	}
+	// nolint:goconst
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		// Construct the operator's service account identity from environment variables
+		// injected via the Kubernetes Downward API (see config/manager/manager.yaml).
+		// This allows the validating webhook to exempt the operator's own reconciliation
+		// updates regardless of the namespace it is deployed in.
+		podNamespace := cmp.Or(os.Getenv("POD_NAMESPACE"), "otterscale-system")
+		podServiceAccount := cmp.Or(os.Getenv("POD_SERVICE_ACCOUNT"), "otterscale-operator-controller-manager")
+		operatorSA := ws.OperatorServiceAccountIdentity(podNamespace, podServiceAccount)
+
+		if err := webhooktenantv1alpha1.SetupWorkspaceWebhookWithManager(mgr, operatorSA); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "Workspace")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 

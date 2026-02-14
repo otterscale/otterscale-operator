@@ -21,28 +21,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// WorkspaceUserRole defines the role of a user in the workspace.
+// MemberRole defines the role of a member in the workspace.
 // It determines the RBAC permissions granted within the target namespace.
 // +kubebuilder:validation:Enum=admin;edit;view
 // +enum
-type WorkspaceUserRole string
+type MemberRole string
 
 const (
-	// WorkspaceUserRoleAdmin has full control over the workspace resources.
-	WorkspaceUserRoleAdmin WorkspaceUserRole = "admin"
-	// WorkspaceUserRoleEdit can create/update application resources but cannot modify role bindings.
-	WorkspaceUserRoleEdit WorkspaceUserRole = "edit"
-	// WorkspaceUserRoleView has read-only access to resources.
-	WorkspaceUserRoleView WorkspaceUserRole = "view"
+	// MemberRoleAdmin has full control over the workspace resources.
+	MemberRoleAdmin MemberRole = "admin"
+	// MemberRoleEdit can create/update application resources but cannot modify role bindings.
+	MemberRoleEdit MemberRole = "edit"
+	// MemberRoleView has read-only access to resources.
+	MemberRoleView MemberRole = "view"
 )
 
-// WorkspaceUser defines a single user entity associated with a workspace.
-type WorkspaceUser struct {
+// WorkspaceMember defines a single member entity associated with a workspace.
+type WorkspaceMember struct {
 	// Role defines the authorization level (Admin, Edit, View).
 	// +required
-	Role WorkspaceUserRole `json:"role"`
+	Role MemberRole `json:"role"`
 
-	// Subject is the unique identifier of the user (e.g., OIDC subject or username).
+	// Subject is the unique identifier of the member (e.g., OIDC subject or username).
 	// This identifier maps directly to the Kubernetes RBAC Subject.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
@@ -50,14 +50,15 @@ type WorkspaceUser struct {
 	// +required
 	Subject string `json:"subject"`
 
-	// Name is the human-readable display name of the user.
+	// Name is the human-readable display name of the member.
 	// +optional
 	Name *string `json:"name,omitempty"`
 }
 
-// WorkspaceNetworkIsolation configures network policies for the workspace.
+// NetworkIsolationSpec configures network policies for the workspace.
 // It supports both standard NetworkPolicy and Istio AuthorizationPolicy.
-type WorkspaceNetworkIsolation struct {
+// +kubebuilder:validation:XValidation:rule="!has(self.allowedNamespaces) || size(self.allowedNamespaces) == 0 || self.enabled",message="allowedNamespaces can only be set when network isolation is enabled"
+type NetworkIsolationSpec struct {
 	// Enabled toggles the enforcement of network isolation.
 	// If true, default deny-all ingress rules are applied except for allowed namespaces.
 	// +optional
@@ -76,7 +77,7 @@ type WorkspaceNetworkIsolation struct {
 }
 
 // WorkspaceSpec defines the desired state of the Workspace.
-// It includes user management, resource constraints, and network security settings.
+// It includes member management, resource constraints, and network security settings.
 type WorkspaceSpec struct {
 	// Namespace is the name of the Kubernetes Namespace to be created for this workspace.
 	// It must be unique across all Workspaces.
@@ -88,13 +89,13 @@ type WorkspaceSpec struct {
 	// +required
 	Namespace string `json:"namespace"`
 
-	// Users is the list of users granted access to this workspace.
+	// Members is the list of members granted access to this workspace.
 	// +listType=map
 	// +listMapKey=subject
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.exists(u, u.role == 'admin')",message="at least one workspace user must have role 'admin'"
+	// +kubebuilder:validation:XValidation:rule="self.exists(u, u.role == 'admin')",message="at least one workspace member must have role 'admin'"
 	// +required
-	Users []WorkspaceUser `json:"users,omitempty"`
+	Members []WorkspaceMember `json:"members"`
 
 	// ResourceQuota describes the compute resource constraints (CPU, Memory, etc.) applied to the underlying namespace.
 	// +optional
@@ -106,40 +107,61 @@ type WorkspaceSpec struct {
 
 	// NetworkIsolation defines the ingress traffic rules for the workspace.
 	// +optional
-	NetworkIsolation WorkspaceNetworkIsolation `json:"networkIsolation,omitzero"`
+	NetworkIsolation NetworkIsolationSpec `json:"networkIsolation,omitzero"`
+}
+
+// ResourceReference is a lightweight reference to a Kubernetes resource managed by the operator.
+// Unlike corev1.ObjectReference, it only contains the essential fields needed
+// to identify the resource, avoiding stale UID/ResourceVersion issues.
+type ResourceReference struct {
+	// Name is the name of the referenced resource.
+	// +required
+	Name string `json:"name"`
+
+	// Namespace is the namespace of the referenced resource.
+	// Empty for cluster-scoped resources.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // WorkspaceStatus defines the observed state of the Workspace.
 // It contains references to the actual Kubernetes resources created by the operator.
 type WorkspaceStatus struct {
-	// NamespaceRef is a reference to the corev1.Namespace managed by this Workspace.
+	// ObservedGeneration is the most recent generation observed by the controller.
+	// It corresponds to the Workspace's generation, which is updated on mutation by the API Server.
+	// This allows clients to determine whether the controller has processed the latest spec changes.
 	// +optional
-	NamespaceRef *corev1.ObjectReference `json:"namespaceRef,omitempty"`
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// ResourceQuotaRef is a reference to the corev1.ResourceQuota managed by this Workspace.
+	// NamespaceRef is a reference to the Namespace managed by this Workspace.
 	// +optional
-	ResourceQuotaRef *corev1.ObjectReference `json:"resourceQuotaRef,omitempty"`
+	NamespaceRef *ResourceReference `json:"namespaceRef,omitempty"`
 
-	// LimitRangeRef is a reference to the corev1.LimitRange managed by this Workspace.
+	// ResourceQuotaRef is a reference to the ResourceQuota managed by this Workspace.
 	// +optional
-	LimitRangeRef *corev1.ObjectReference `json:"limitRangeRef,omitempty"`
+	ResourceQuotaRef *ResourceReference `json:"resourceQuotaRef,omitempty"`
 
-	// RoleBindingRefs contains references to all RBAC RoleBindings created for the workspace users.
-	// +listType=atomic
+	// LimitRangeRef is a reference to the LimitRange managed by this Workspace.
 	// +optional
-	RoleBindingRefs []corev1.ObjectReference `json:"roleBindingRefs,omitempty"`
+	LimitRangeRef *ResourceReference `json:"limitRangeRef,omitempty"`
+
+	// RoleBindingRefs contains references to all RBAC RoleBindings created for the workspace members.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	RoleBindingRefs []ResourceReference `json:"roleBindingRefs,omitempty"`
 
 	// PeerAuthenticationRef is a reference to the Istio PeerAuthentication resource for mTLS settings.
 	// +optional
-	PeerAuthenticationRef *corev1.ObjectReference `json:"peerAuthenticationRef,omitempty"`
+	PeerAuthenticationRef *ResourceReference `json:"peerAuthenticationRef,omitempty"`
 
 	// AuthorizationPolicyRef is a reference to the Istio AuthorizationPolicy enforcing network isolation.
 	// +optional
-	AuthorizationPolicyRef *corev1.ObjectReference `json:"authorizationPolicyRef,omitempty"`
+	AuthorizationPolicyRef *ResourceReference `json:"authorizationPolicyRef,omitempty"`
 
-	// NetworkPolicyRef is a reference to the corev1.NetworkPolicy enforcing network isolation.
+	// NetworkPolicyRef is a reference to the NetworkPolicy enforcing network isolation.
 	// +optional
-	NetworkPolicyRef *corev1.ObjectReference `json:"networkPolicyRef,omitempty"`
+	NetworkPolicyRef *ResourceReference `json:"networkPolicyRef,omitempty"`
 
 	// Conditions store the status conditions of the Workspace (e.g., Ready, Failed).
 	// +listType=map
@@ -152,10 +174,11 @@ type WorkspaceStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespaceRef.name`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Workspace is the Schema for the workspaces API.
-// A Workspace represents a logical isolation unit (Namespace) with associated policies, quotas, and user access.
+// A Workspace represents a logical isolation unit (Namespace) with associated policies, quotas, and member access.
 type Workspace struct {
 	metav1.TypeMeta `json:",inline"`
 
