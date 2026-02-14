@@ -31,6 +31,7 @@ var _ = Describe("Workspace Webhook", func() {
 	var (
 		obj       *tenantv1alpha1.Workspace
 		defaulter WorkspaceCustomDefaulter
+		validator WorkspaceCustomValidator
 	)
 
 	BeforeEach(func() {
@@ -44,6 +45,8 @@ var _ = Describe("Workspace Webhook", func() {
 			},
 		}
 		defaulter = WorkspaceCustomDefaulter{}
+		validator = WorkspaceCustomValidator{}
+		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
 	})
 
 	Context("Member Label Synchronization", func() {
@@ -163,4 +166,27 @@ var _ = Describe("Workspace Webhook", func() {
 			Expect(err.Error()).To(ContainSubstring("expected a Workspace object"))
 		})
 	})
+	Context("When creating or updating Workspace under Validating Webhook", func() {
+		// TODO (user): Add logic for validating webhooks
+		// Example:
+		// It("Should deny creation if a required field is missing", func() {
+		//     By("simulating an invalid creation scenario")
+		//     obj.SomeRequiredField = ""
+		//     Expect(validator.ValidateCreate(ctx, obj)).Error().To(HaveOccurred())
+		// })
+		//
+		// It("Should admit creation if all required fields are present", func() {
+		//     By("simulating an invalid creation scenario")
+		//     obj.SomeRequiredField = "valid_value"
+		//     Expect(validator.ValidateCreate(ctx, obj)).To(BeNil())
+		// })
+		//
+		// It("Should validate updates correctly", func() {
+		//     By("simulating a valid update scenario")
+		//     oldObj.SomeRequiredField = "updated_value"
+		//     obj.SomeRequiredField = "updated_value"
+		//     Expect(validator.ValidateUpdate(ctx, oldObj, obj)).To(BeNil())
+		// })
+	})
+
 })
