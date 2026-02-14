@@ -99,42 +99,65 @@ func defaultMemberLabels(workspace *tenantv1alpha1.Workspace) {
 	workspace.SetLabels(labels)
 }
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
-// NOTE: If you want to customise the 'path', use the flags '--defaulting-path' or '--validation-path'.
-// +kubebuilder:webhook:path=/validate-tenant-otterscale-io-v1alpha1-workspace,mutating=false,failurePolicy=fail,sideEffects=None,groups=tenant.otterscale.io,resources=workspaces,verbs=create;update,versions=v1alpha1,name=vworkspace-v1alpha1.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-tenant-otterscale-io-v1alpha1-workspace,mutating=false,failurePolicy=fail,sideEffects=None,groups=tenant.otterscale.io,resources=workspaces,verbs=create;update;delete,versions=v1alpha1,name=vworkspace-v1alpha1.kb.io,admissionReviewVersions=v1
 
-// WorkspaceCustomValidator struct is responsible for validating the Workspace resource
-// when it is created, updated, or deleted.
+// WorkspaceCustomValidator enforces workspace-level authorization on mutating
+// operations. Only workspace members with the "admin" role (or cluster-level
+// privileged identities) are permitted to update or delete a Workspace.
 //
-// NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
-// as this struct is used only for temporary operations and does not need to be deeply copied.
-type WorkspaceCustomValidator struct {
-	// TODO(user): Add more fields as needed for validation
+// The authorization logic itself is kept in internal/core/workspace/ for
+// testability; this validator is intentionally thin.
+type WorkspaceCustomValidator struct{}
+
+// ValidateCreate is a no-op. Any authenticated user that passes RBAC is allowed
+// to create a Workspace; there is no ownership to protect yet.
+func (v *WorkspaceCustomValidator) ValidateCreate(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+	return nil, nil
 }
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type Workspace.
-func (v *WorkspaceCustomValidator) ValidateCreate(_ context.Context, obj *tenantv1alpha1.Workspace) (admission.Warnings, error) {
-	workspacelog.Info("Validation for Workspace upon creation", "name", obj.GetName())
+// ValidateUpdate ensures only workspace admins (or privileged identities) can
+// modify an existing Workspace. The check uses oldObj so that a user cannot
+// grant themselves admin and approve in the same request.
+func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	oldWorkspace, ok := oldObj.(*tenantv1alpha1.Workspace)
+	if !ok {
+		return nil, fmt.Errorf("expected a Workspace object but got %T", oldObj)
+	}
+	newWorkspace, ok := newObj.(*tenantv1alpha1.Workspace)
+	if !ok {
+		return nil, fmt.Errorf("expected a Workspace object but got %T", newObj)
+	}
+	workspacelog.Info("Validating Workspace update", "name", newWorkspace.GetName())
 
-	// TODO(user): fill in your validation logic upon object creation.
+	req, err := admission.RequestFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve admission request from context: %w", err)
+	}
+
+	if err := ws.AuthorizeModification(req.UserInfo, oldWorkspace); err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type Workspace.
-func (v *WorkspaceCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj *tenantv1alpha1.Workspace) (admission.Warnings, error) {
-	workspacelog.Info("Validation for Workspace upon update", "name", newObj.GetName())
+// ValidateDelete ensures only workspace admins (or privileged identities) can
+// delete a Workspace.
+func (v *WorkspaceCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	workspace, ok := obj.(*tenantv1alpha1.Workspace)
+	if !ok {
+		return nil, fmt.Errorf("expected a Workspace object but got %T", obj)
+	}
+	workspacelog.Info("Validating Workspace deletion", "name", workspace.GetName())
 
-	// TODO(user): fill in your validation logic upon object update.
+	req, err := admission.RequestFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("unable to retrieve admission request from context: %w", err)
+	}
 
-	return nil, nil
-}
-
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type Workspace.
-func (v *WorkspaceCustomValidator) ValidateDelete(_ context.Context, obj *tenantv1alpha1.Workspace) (admission.Warnings, error) {
-	workspacelog.Info("Validation for Workspace upon deletion", "name", obj.GetName())
-
-	// TODO(user): fill in your validation logic upon object deletion.
+	if err := ws.AuthorizeModification(req.UserInfo, workspace); err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
