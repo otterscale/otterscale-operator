@@ -48,16 +48,6 @@ spec:
           spec:
             description: Spec defines the desired behavior of the Workspace.
             properties:
-              deletionPolicy:
-                default: OrphanNamespace
-                description: |-
-                  DeletionPolicy controls what happens to the underlying namespace when this Workspace is deleted.
-                  - OrphanNamespace (default): keep the namespace and its contents.
-                  - DeleteNamespace: delete the namespace (and therefore everything inside it).
-                enum:
-                - OrphanNamespace
-                - DeleteNamespace
-                type: string
               limitRange:
                 description: LimitRange describes the default resource limits and
                   requests for pods in the workspace.

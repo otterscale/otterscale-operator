@@ -173,45 +173,6 @@ var _ = Describe("Workspace Controller", func() {
 		})
 	})
 
-	Context("Deletion Policy", func() {
-		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {
-				ws.Spec.DeletionPolicy = tenantv1alpha1.WorkspaceDeletionPolicyDeleteNamespace
-			})
-		})
-
-		It("should delete the namespace when deletionPolicy=DeleteNamespace", func() {
-			fullyReconcile()
-
-			By("Deleting the workspace and requesting namespace deletion")
-			wsKey := types.NamespacedName{Name: resourceName}
-			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
-
-			Eventually(func() bool {
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: wsKey})
-				Expect(err).NotTo(HaveOccurred())
-
-				var ns corev1.Namespace
-				if err := k8sClient.Get(ctx, types.NamespacedName{Name: namespaceName}, &ns); err != nil {
-					return false
-				}
-				return !ns.DeletionTimestamp.IsZero()
-			}, timeout, interval).Should(BeTrue())
-
-			By("Verifying deletion is blocked by the workspace finalizer")
-			var ws tenantv1alpha1.Workspace
-			Expect(k8sClient.Get(ctx, wsKey, &ws)).To(Succeed())
-			Expect(ws.Finalizers).To(ContainElement(workspaceFinalizerName))
-
-			By("Cleaning up by removing the finalizer (envtest has no namespace controller)")
-			ws.Finalizers = nil
-			Expect(k8sClient.Update(ctx, &ws)).To(Succeed())
-			Eventually(func() bool {
-				return errors.IsNotFound(k8sClient.Get(ctx, wsKey, &tenantv1alpha1.Workspace{}))
-			}, timeout, interval).Should(BeTrue())
-		})
-	})
-
 	Context("Resource Management", func() {
 		BeforeEach(func() {
 			workspace = makeWorkspace(resourceName, namespaceName, func(ws *tenantv1alpha1.Workspace) {

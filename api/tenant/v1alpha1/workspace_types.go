@@ -36,20 +36,6 @@ const (
 	WorkspaceUserRoleView WorkspaceUserRole = "view"
 )
 
-// WorkspaceDeletionPolicy controls how underlying resources behave on deletion.
-// +kubebuilder:validation:Enum=OrphanNamespace;DeleteNamespace
-// +enum
-type WorkspaceDeletionPolicy string
-
-const (
-	// WorkspaceDeletionPolicyOrphanNamespace keeps the namespace and its contents.
-	// The controller removes ownership to prevent garbage collection.
-	WorkspaceDeletionPolicyOrphanNamespace WorkspaceDeletionPolicy = "OrphanNamespace"
-
-	// WorkspaceDeletionPolicyDeleteNamespace deletes the underlying namespace.
-	WorkspaceDeletionPolicyDeleteNamespace WorkspaceDeletionPolicy = "DeleteNamespace"
-)
-
 // WorkspaceUser defines a single user entity associated with a workspace.
 type WorkspaceUser struct {
 	// Role defines the authorization level (Admin, Edit, View).
@@ -109,13 +95,6 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self.exists(u, u.role == 'admin')",message="at least one workspace user must have role 'admin'"
 	// +required
 	Users []WorkspaceUser `json:"users,omitempty"`
-
-	// DeletionPolicy controls what happens to the underlying namespace when this Workspace is deleted.
-	// - OrphanNamespace (default): keep the namespace and its contents.
-	// - DeleteNamespace: delete the namespace (and therefore everything inside it).
-	// +kubebuilder:default:=OrphanNamespace
-	// +optional
-	DeletionPolicy WorkspaceDeletionPolicy `json:"deletionPolicy,omitempty"`
 
 	// ResourceQuota describes the compute resource constraints (CPU, Memory, etc.) applied to the underlying namespace.
 	// +optional
