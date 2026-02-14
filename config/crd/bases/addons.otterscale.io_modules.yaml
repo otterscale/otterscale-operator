@@ -14,20 +14,7 @@ spec:
     singular: module
   scope: Cluster
   versions:
-  - additionalPrinterColumns:
-    - jsonPath: .spec.enabled
-      name: Enabled
-      type: boolean
-    - jsonPath: .spec.templateRef
-      name: Template
-      type: string
-    - jsonPath: .status.conditions[?(@.type=="Ready")].status
-      name: Ready
-      type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1alpha1
+  - name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Module is the Schema for the modules API
@@ -52,76 +39,14 @@ spec:
           spec:
             description: spec defines the desired state of Module
             properties:
-              enabled:
-                description: |-
-                  Enabled toggles this module on/off.
-
-                  - When enabled is true, the operator will ensure the corresponding Flux resource
-                    (Kustomization or HelmRelease) exists.
-                  - When enabled is false, the operator will delete the previously created Flux resource(s).
-                type: boolean
-              templateRef:
-                description: |-
-                  TemplateRef selects which template entry to use from the templates ConfigMap.
-                  If omitted, the operator will use this Module's name (metadata.name) as the template ID.
-                maxLength: 63
-                minLength: 1
-                pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$
+              foo:
+                description: foo is an example field of Module. Edit module_types.go
+                  to remove/update
                 type: string
             type: object
           status:
             description: status defines the observed state of Module
             properties:
-              appliedResources:
-                description: |-
-                  AppliedResources contains references to Flux resources created/managed for this Module.
-                  It is used for cleanup when the module is disabled.
-                items:
-                  description: ObjectReference contains enough information to let
-                    you inspect or modify the referred object.
-                  properties:
-                    apiVersion:
-                      description: API version of the referent.
-                      type: string
-                    fieldPath:
-                      description: |-
-                        If referring to a piece of an object instead of an entire object, this string
-                        should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                        For example, if the object reference is to a container within a pod, this would take on a value like:
-                        "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                        the event) or if no container name is specified "spec.containers[2]" (container with
-                        index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                        referencing a part of an object.
-                      type: string
-                    kind:
-                      description: |-
-                        Kind of the referent.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                      type: string
-                    name:
-                      description: |-
-                        Name of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                      type: string
-                    namespace:
-                      description: |-
-                        Namespace of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
-                      type: string
-                    resourceVersion:
-                      description: |-
-                        Specific resourceVersion to which this reference is made, if any.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                      type: string
-                    uid:
-                      description: |-
-                        UID of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                      type: string
-                  type: object
-                  x-kubernetes-map-type: atomic
-                type: array
-                x-kubernetes-list-type: atomic
               conditions:
                 description: |-
                   conditions represent the current state of the Module resource.
@@ -191,16 +116,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller.
-                format: int64
-                type: integer
-              templateResourceVersion:
-                description: |-
-                  TemplateResourceVersion captures the templates ConfigMap resourceVersion that was last applied.
-                  This helps with observability/debugging when templates are updated.
-                type: string
             type: object
         required:
         - spec

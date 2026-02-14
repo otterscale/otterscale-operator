@@ -21,11 +21,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,105 +37,48 @@ var _ = Describe("Module Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name: resourceName, // Module is cluster-scoped
+			Name:      resourceName,
+			Namespace: "default", // TODO(user):Modify as needed
 		}
 		module := &addonsv1alpha1.Module{}
 
 		BeforeEach(func() {
-			By("creating the templates ConfigMap")
-			if err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: defaultTemplatesConfigMapNamespace}}); err != nil && !errors.IsAlreadyExists(err) {
-				Expect(err).NotTo(HaveOccurred())
-			}
-			if err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "flux-system"}}); err != nil && !errors.IsAlreadyExists(err) {
-				Expect(err).NotTo(HaveOccurred())
-			}
-			cm := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      defaultTemplatesConfigMapName,
-					Namespace: defaultTemplatesConfigMapNamespace,
-				},
-				Data: map[string]string{
-					templatesConfigMapDataKey: `- id: test-resource
-  manifest: |
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: test-resource
-      namespace: flux-system
-    spec:
-      interval: 1m
-      path: ./dummy
-      prune: true
-      sourceRef:
-        kind: GitRepository
-        name: flux-system
-`,
-				},
-			}
-			if err := k8sClient.Create(ctx, cm); err != nil {
-				if errors.IsAlreadyExists(err) {
-					Expect(k8sClient.Update(ctx, cm)).To(Succeed())
-				} else {
-					Expect(err).NotTo(HaveOccurred())
-				}
-			}
-
 			By("creating the custom resource for the Kind Module")
 			err := k8sClient.Get(ctx, typeNamespacedName, module)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &addonsv1alpha1.Module{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: resourceName,
+						Name:      resourceName,
+						Namespace: "default",
 					},
-					Spec: addonsv1alpha1.ModuleSpec{
-						Enabled: true,
-					},
+					// TODO(user): Specify other spec details if needed.
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
 		})
 
 		AfterEach(func() {
+			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &addonsv1alpha1.Module{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(client.IgnoreNotFound(err)).To(Succeed())
+			Expect(err).NotTo(HaveOccurred())
 
 			By("Cleanup the specific resource instance Module")
-			_ = k8sClient.Delete(ctx, resource)
+			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &ModuleReconciler{
-				Client:                      k8sClient,
-				Scheme:                      k8sClient.Scheme(),
-				TemplatesConfigMapName:      defaultTemplatesConfigMapName,
-				TemplatesConfigMapNamespace: defaultTemplatesConfigMapNamespace,
-				DefaultFluxNamespace:        "flux-system",
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-
-			By("expecting the Flux Kustomization to exist")
-			ks := &unstructured.Unstructured{}
-			ks.SetAPIVersion("kustomize.toolkit.fluxcd.io/v1")
-			ks.SetKind("Kustomization")
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName, Namespace: "flux-system"}, ks)).To(Succeed())
-
-			By("disabling the module and expecting the Flux resource to be deleted")
-			Expect(k8sClient.Get(ctx, typeNamespacedName, module)).To(Succeed())
-			module.Spec.Enabled = false
-			Expect(k8sClient.Update(ctx, module)).To(Succeed())
-
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).NotTo(HaveOccurred())
-
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, types.NamespacedName{Name: resourceName, Namespace: "flux-system"}, ks)
-				return errors.IsNotFound(err)
-			}).Should(BeTrue())
+			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
+			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
 	})
 })

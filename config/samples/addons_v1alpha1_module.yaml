@@ -6,7 +6,4 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: module-sample
 spec:
-  # enabled toggles creation of the underlying Flux resource(s).
-  enabled: false
-  # templateRef defaults to metadata.name if omitted.
-  # templateRef: module-sample
+  # TODO(user): Add fields here
