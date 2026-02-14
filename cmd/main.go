@@ -39,6 +39,7 @@ import (
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	tenantcontroller "github.com/otterscale/otterscale-operator/internal/controller/tenant"
+	webhooktenantv1alpha1 "github.com/otterscale/otterscale-operator/internal/webhook/tenant/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -188,6 +189,13 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)
+	}
+	// nolint:goconst
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err := webhooktenantv1alpha1.SetupWorkspaceWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "Workspace")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
