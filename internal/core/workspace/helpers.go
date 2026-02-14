@@ -31,7 +31,6 @@ const (
 	PeerAuthenticationName  = "workspace-peer-authentication"
 	AuthorizationPolicyName = "workspace-authorization-policy"
 
-	FinalizerName   = "tenant.otterscale.io/workspace-finalizer"
 	UserLabelPrefix = "user.otterscale.io/"
 )
 

@@ -23,13 +23,10 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -40,7 +37,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
-	ws "github.com/otterscale/otterscale-operator/internal/domain/workspace"
+	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 )
 
 // WorkspaceReconciler reconciles a Workspace object.
@@ -48,7 +45,7 @@ import (
 // match the desired state defined in the Workspace CR.
 //
 // The controller is intentionally kept thin: it orchestrates the reconciliation flow,
-// while the actual resource synchronization logic resides in internal/domain/workspace/.
+// while the actual resource synchronization logic resides in internal/core/workspace/.
 type WorkspaceReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
@@ -60,7 +57,6 @@ type WorkspaceReconciler struct {
 // RBAC Permissions required by the controller:
 // +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -70,7 +66,11 @@ type WorkspaceReconciler struct {
 
 // Reconcile is the main loop for the controller.
 // It implements the level-triggered reconciliation logic with a thin orchestration pattern:
-// Fetch -> Finalizer -> Label Sync -> Domain Sync -> Status Update.
+// Fetch -> Label Sync -> Domain Sync -> Status Update.
+//
+// Deletion is handled entirely by Kubernetes garbage collection: all child resources
+// are created with OwnerReferences pointing to the Workspace, so they are automatically
+// cascade-deleted when the Workspace is removed. No finalizer is needed.
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithName(req.Name)
 	ctx = log.IntoContext(ctx, logger)
@@ -81,22 +81,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 2. Handle deletion first to ensure finalizer-driven behavior is respected.
-	if !w.DeletionTimestamp.IsZero() {
-		return r.reconcileDeletion(ctx, &w)
-	}
-
-	// 3. Ensure finalizer is present for safe, explicit deletion handling.
-	if !ctrlutil.ContainsFinalizer(&w, ws.FinalizerName) {
-		patch := client.MergeFrom(w.DeepCopy())
-		ctrlutil.AddFinalizer(&w, ws.FinalizerName)
-		if err := r.Patch(ctx, &w, patch); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// 4. Reconcile Self Labels (Label Mirroring)
+	// 2. Reconcile Self Labels (Label Mirroring)
 	updated, err := ws.ReconcileUserLabels(ctx, r.Client, &w)
 	if err != nil {
 		r.setReadyConditionFalse(ctx, &w, "LabelSyncError", err.Error())
@@ -107,12 +92,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	// 5. Reconcile all domain resources
+	// 3. Reconcile all domain resources
 	if err := r.reconcileResources(ctx, &w); err != nil {
 		return r.handleReconcileError(ctx, &w, err)
 	}
 
-	// 6. Update Status (Reflect the observed state back to the user)
+	// 4. Update Status (Reflect the observed state back to the user)
 	if err := r.updateStatus(ctx, &w); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -171,37 +156,6 @@ func (r *WorkspaceReconciler) setReadyConditionFalse(ctx context.Context, w *ten
 	if err := r.Status().Patch(ctx, w, patch); err != nil {
 		logger.Error(err, "Failed to patch Ready=False status condition", "reason", reason)
 	}
-}
-
-func (r *WorkspaceReconciler) reconcileDeletion(ctx context.Context, w *tenantv1alpha1.Workspace) (ctrl.Result, error) {
-	// Orphan the namespace: remove the OwnerReference so it is not garbage-collected.
-	if w.Spec.Namespace != "" {
-		var ns corev1.Namespace
-		if err := r.Get(ctx, types.NamespacedName{Name: w.Spec.Namespace}, &ns); err == nil {
-			newRefs := make([]metav1.OwnerReference, 0, len(ns.OwnerReferences))
-			for _, ref := range ns.OwnerReferences {
-				if ref.UID != w.UID {
-					newRefs = append(newRefs, ref)
-				}
-			}
-			if len(newRefs) != len(ns.OwnerReferences) {
-				ns.OwnerReferences = newRefs
-				if err := r.Update(ctx, &ns); err != nil {
-					return ctrl.Result{}, err
-				}
-			}
-		} else if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-	}
-
-	// Remove finalizer using patch to avoid ResourceVersion conflicts
-	patch := client.MergeFrom(w.DeepCopy())
-	ctrlutil.RemoveFinalizer(w, ws.FinalizerName)
-	if err := r.Patch(ctx, w, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
 }
 
 // SetupWithManager registers the controller with the Manager and defines watches.

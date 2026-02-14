@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
-	ws "github.com/otterscale/otterscale-operator/internal/domain/workspace"
+	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 )
 
 var _ = Describe("Workspace Controller", func() {
@@ -80,9 +80,8 @@ var _ = Describe("Workspace Controller", func() {
 	}
 
 	fullyReconcile := func() {
-		executeReconcile() // 1) adds finalizer
-		executeReconcile() // 2) syncs user labels
-		executeReconcile() // 3) provisions resources + updates status
+		executeReconcile() // 1) syncs user labels
+		executeReconcile() // 2) provisions resources + updates status
 	}
 
 	fetchResource := func(obj client.Object, name, namespace string) {
@@ -115,8 +114,6 @@ var _ = Describe("Workspace Controller", func() {
 		if err := k8sClient.Get(ctx, nsName, workspace); err == nil {
 			Expect(k8sClient.Delete(ctx, workspace)).To(Succeed())
 			Eventually(func() bool {
-				_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-				Expect(err).NotTo(HaveOccurred())
 				return errors.IsNotFound(k8sClient.Get(ctx, nsName, workspace))
 			}, timeout, interval).Should(BeTrue())
 		}
@@ -158,8 +155,6 @@ var _ = Describe("Workspace Controller", func() {
 			By("Running reconciliation until it hits the namespace conflict")
 			nsName := types.NamespacedName{Name: resourceName}
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-			Expect(err).NotTo(HaveOccurred()) // add finalizer
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
 			Expect(err).NotTo(HaveOccurred()) // sync labels
 
 			// Namespace conflict is a permanent error: should NOT return error (no requeue)
