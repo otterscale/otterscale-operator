@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -26,42 +25,23 @@ import (
 
 // ModuleSpec defines the desired state of Module
 type ModuleSpec struct {
-	// Enabled toggles this module on/off.
-	//
-	// - When enabled is true, the operator will ensure the corresponding Flux resource
-	//   (Kustomization or HelmRelease) exists.
-	// - When enabled is false, the operator will delete the previously created Flux resource(s).
-	//
-	// +optional
-	Enabled bool `json:"enabled"`
+	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
+	// The following markers will use OpenAPI v3 schema to validate the value
+	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	// TemplateRef selects which template entry to use from the templates ConfigMap.
-	// If omitted, the operator will use this Module's name (metadata.name) as the template ID.
-	//
+	// foo is an example field of Module. Edit module_types.go to remove/update
 	// +optional
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
-	TemplateRef *string `json:"templateRef,omitempty"`
+	Foo *string `json:"foo,omitempty"`
 }
 
 // ModuleStatus defines the observed state of Module.
 type ModuleStatus struct {
-	// ObservedGeneration is the most recent generation observed by the controller.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
 
-	// AppliedResources contains references to Flux resources created/managed for this Module.
-	// It is used for cleanup when the module is disabled.
-	//
-	// +listType=atomic
-	// +optional
-	AppliedResources []corev1.ObjectReference `json:"appliedResources,omitempty"`
-
-	// TemplateResourceVersion captures the templates ConfigMap resourceVersion that was last applied.
-	// This helps with observability/debugging when templates are updated.
-	// +optional
-	TemplateResourceVersion *string `json:"templateResourceVersion,omitempty"`
+	// For Kubernetes API conventions, see:
+	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
 
 	// conditions represent the current state of the Module resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
@@ -81,10 +61,6 @@ type ModuleStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
-// +kubebuilder:printcolumn:name="Enabled",type=boolean,JSONPath=`.spec.enabled`
-// +kubebuilder:printcolumn:name="Template",type=string,JSONPath=`.spec.templateRef`
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
-// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Module is the Schema for the modules API
 type Module struct {
