@@ -109,7 +109,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = SetupWorkspaceWebhookWithManager(mgr)
+	err = SetupWorkspaceWebhookWithManager(mgr, "system:serviceaccount:test-system:test-controller-manager")
 	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:webhook

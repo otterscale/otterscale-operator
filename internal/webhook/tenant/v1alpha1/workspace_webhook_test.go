@@ -45,7 +45,7 @@ var _ = Describe("Workspace Webhook", func() {
 			},
 		}
 		defaulter = WorkspaceCustomDefaulter{}
-		validator = WorkspaceCustomValidator{}
+		validator = WorkspaceCustomValidator{OperatorSA: "system:serviceaccount:test-system:test-controller-manager"}
 		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
 	})
 

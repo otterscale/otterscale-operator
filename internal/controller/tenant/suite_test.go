@@ -124,7 +124,9 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	err = webhooktenantv1alpha1.SetupWorkspaceWebhookWithManager(mgr)
+	// Use the same SA identity as the hardcoded const in validation tests.
+	err = webhooktenantv1alpha1.SetupWorkspaceWebhookWithManager(mgr,
+		"system:serviceaccount:otterscale-system:otterscale-operator-controller-manager")
 	Expect(err).NotTo(HaveOccurred())
 
 	go func() {

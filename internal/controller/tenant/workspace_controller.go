@@ -40,6 +40,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
@@ -53,8 +54,9 @@ import (
 // while the actual resource synchronization logic resides in internal/core/workspace/.
 type WorkspaceReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Version string
+	Scheme   *runtime.Scheme
+	Version  string
+	Recorder record.EventRecorder
 
 	istioDetector *IstioDetector
 }
@@ -62,6 +64,7 @@ type WorkspaceReconciler struct {
 // RBAC Permissions required by the controller:
 // +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tenant.otterscale.io,resources=workspaces/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=namespaces;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
@@ -129,11 +132,13 @@ func (r *WorkspaceReconciler) handleReconcileError(ctx context.Context, w *tenan
 	if errors.As(err, &nce) {
 		// Permanent error: do not requeue, just update status
 		r.setReadyConditionFalse(ctx, w, "NamespaceConflict", err.Error())
+		r.Recorder.Event(w, corev1.EventTypeWarning, "NamespaceConflict", err.Error())
 		return ctrl.Result{}, nil
 	}
 
 	// Transient error: update status and requeue
 	r.setReadyConditionFalse(ctx, w, "ReconcileError", err.Error())
+	r.Recorder.Event(w, corev1.EventTypeWarning, "ReconcileError", err.Error())
 	return ctrl.Result{}, err
 }
 
@@ -347,6 +352,8 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 			return err
 		}
 		log.FromContext(ctx).Info("Workspace status updated")
+		r.Recorder.Eventf(w, corev1.EventTypeNormal, "Reconciled",
+			"Workspace resources reconciled for namespace %s", w.Spec.Namespace)
 	}
 
 	return nil

@@ -38,6 +38,16 @@ func newWorkspace(members []tenantv1alpha1.WorkspaceMember) *tenantv1alpha1.Work
 	}
 }
 
+const testOperatorSA = "system:serviceaccount:test-system:test-controller-manager"
+
+func TestOperatorServiceAccountIdentity(t *testing.T) {
+	got := OperatorServiceAccountIdentity("otterscale-system", "otterscale-operator-controller-manager")
+	want := "system:serviceaccount:otterscale-system:otterscale-operator-controller-manager"
+	if got != want {
+		t.Errorf("OperatorServiceAccountIdentity() = %q, want %q", got, want)
+	}
+}
+
 func TestAuthorizeModification(t *testing.T) {
 	workspace := newWorkspace([]tenantv1alpha1.WorkspaceMember{
 		{Role: tenantv1alpha1.MemberRoleAdmin, Subject: "alice"},
@@ -67,7 +77,7 @@ func TestAuthorizeModification(t *testing.T) {
 		},
 		{
 			name:    "operator service account is allowed",
-			user:    authenticationv1.UserInfo{Username: OperatorServiceAccount},
+			user:    authenticationv1.UserInfo{Username: testOperatorSA},
 			wantErr: false,
 		},
 		{
@@ -104,7 +114,7 @@ func TestAuthorizeModification(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := AuthorizeModification(tt.user, workspace)
+			err := AuthorizeModification(tt.user, workspace, testOperatorSA)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("AuthorizeModification() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -116,13 +126,13 @@ func TestAuthorizeModification_EmptyMembers(t *testing.T) {
 	workspace := newWorkspace(nil)
 
 	// Even an empty member list should deny non-privileged users.
-	err := AuthorizeModification(authenticationv1.UserInfo{Username: "alice"}, workspace)
+	err := AuthorizeModification(authenticationv1.UserInfo{Username: "alice"}, workspace, testOperatorSA)
 	if err == nil {
 		t.Error("AuthorizeModification() expected error for user not in empty members list")
 	}
 
 	// Privileged user should still pass.
-	err = AuthorizeModification(authenticationv1.UserInfo{Username: "admin", Groups: []string{"system:masters"}}, workspace)
+	err = AuthorizeModification(authenticationv1.UserInfo{Username: "admin", Groups: []string{"system:masters"}}, workspace, testOperatorSA)
 	if err != nil {
 		t.Errorf("AuthorizeModification() unexpected error for privileged user: %v", err)
 	}

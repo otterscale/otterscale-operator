@@ -23,7 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
@@ -31,14 +31,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// log is for logging in this package.
-var workspacelog = logf.Log.WithName("workspace-resource")
-
 // SetupWorkspaceWebhookWithManager registers the webhook for Workspace in the manager.
-func SetupWorkspaceWebhookWithManager(mgr ctrl.Manager) error {
+// operatorSA is the full service account identity of the controller-manager
+// (e.g. "system:serviceaccount:otterscale-system:otterscale-operator-controller-manager")
+// used to exempt the operator's own reconciliation updates from workspace-level authorization.
+func SetupWorkspaceWebhookWithManager(mgr ctrl.Manager, operatorSA string) error {
 	return ctrl.NewWebhookManagedBy(mgr, &tenantv1alpha1.Workspace{}).
 		WithCustomDefaulter(&WorkspaceCustomDefaulter{}).
-		WithCustomValidator(&WorkspaceCustomValidator{}).
+		WithCustomValidator(&WorkspaceCustomValidator{OperatorSA: operatorSA}).
 		Complete()
 }
 
@@ -55,12 +55,12 @@ type WorkspaceCustomDefaulter struct{}
 // Default implements admission.CustomDefaulter so a webhook will be registered for the Kind Workspace.
 // It ensures that labels with the prefix "user.otterscale.io/" mirror the current member subjects,
 // removing stale entries and preserving all other labels.
-func (d *WorkspaceCustomDefaulter) Default(_ context.Context, obj runtime.Object) error {
+func (d *WorkspaceCustomDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	workspace, ok := obj.(*tenantv1alpha1.Workspace)
 	if !ok {
 		return fmt.Errorf("expected a Workspace object but got %T", obj)
 	}
-	workspacelog.Info("Defaulting for Workspace", "name", workspace.GetName())
+	log.FromContext(ctx).Info("Defaulting for Workspace", "name", workspace.GetName())
 
 	defaultMemberLabels(workspace)
 	return nil
@@ -105,7 +105,11 @@ func defaultMemberLabels(workspace *tenantv1alpha1.Workspace) {
 //
 // The authorization logic itself is kept in internal/core/workspace/ for
 // testability; this validator is intentionally thin.
-type WorkspaceCustomValidator struct{}
+type WorkspaceCustomValidator struct {
+	// OperatorSA is the full service account identity of the controller-manager.
+	// It is injected at startup so the operator works regardless of the namespace it is deployed in.
+	OperatorSA string
+}
 
 // ValidateCreate is a no-op. Any authenticated user that passes RBAC is allowed
 // to create a Workspace; there is no ownership to protect yet.
@@ -125,14 +129,14 @@ func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldObj, n
 	if !ok {
 		return nil, fmt.Errorf("expected a Workspace object but got %T", newObj)
 	}
-	workspacelog.Info("Validating Workspace update", "name", newWorkspace.GetName())
+	log.FromContext(ctx).Info("Validating Workspace update", "name", newWorkspace.GetName())
 
 	req, err := admission.RequestFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve admission request from context: %w", err)
 	}
 
-	if err := ws.AuthorizeModification(req.UserInfo, oldWorkspace); err != nil {
+	if err := ws.AuthorizeModification(req.UserInfo, oldWorkspace, v.OperatorSA); err != nil {
 		return nil, err
 	}
 
@@ -146,14 +150,14 @@ func (v *WorkspaceCustomValidator) ValidateDelete(ctx context.Context, obj runti
 	if !ok {
 		return nil, fmt.Errorf("expected a Workspace object but got %T", obj)
 	}
-	workspacelog.Info("Validating Workspace deletion", "name", workspace.GetName())
+	log.FromContext(ctx).Info("Validating Workspace deletion", "name", workspace.GetName())
 
 	req, err := admission.RequestFromContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve admission request from context: %w", err)
 	}
 
-	if err := ws.AuthorizeModification(req.UserInfo, workspace); err != nil {
+	if err := ws.AuthorizeModification(req.UserInfo, workspace, v.OperatorSA); err != nil {
 		return nil, err
 	}
 

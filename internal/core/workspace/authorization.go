@@ -25,11 +25,13 @@ import (
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 )
 
-const (
-	// OperatorServiceAccount is the identity of the controller-manager used for
-	// self-initiated reconciliation updates. It is always allowed to modify workspaces.
-	OperatorServiceAccount = "system:serviceaccount:otterscale-system:otterscale-operator-controller-manager"
-)
+// OperatorServiceAccountIdentity constructs the full Kubernetes service account
+// identity string from the pod namespace and service account name.
+// Example: OperatorServiceAccountIdentity("otterscale-system", "controller-manager")
+// returns "system:serviceaccount:otterscale-system:controller-manager".
+func OperatorServiceAccountIdentity(namespace, saName string) string {
+	return "system:serviceaccount:" + namespace + ":" + saName
+}
 
 // privilegedGroups are Kubernetes groups that bypass all workspace-level
 // authorization checks (cluster super-admins).
@@ -40,16 +42,20 @@ var privilegedGroups = []string{"system:masters", "kubeadm:cluster-admins"}
 // (pre-update) object so that a user cannot grant themselves admin and
 // approve in the same request.
 //
+// operatorSA is the full service account identity of the controller-manager
+// (e.g. "system:serviceaccount:otterscale-system:otterscale-operator-controller-manager").
+// It is provided at startup so the operator works regardless of the namespace it is deployed in.
+//
 // Allowed callers:
 //   - Members of a privileged group (system:masters, kubeadm:cluster-admins)
-//   - The operator's own ServiceAccount
+//   - The operator's own ServiceAccount (operatorSA)
 //   - A workspace member whose role is "admin" in the current (old) spec
-func AuthorizeModification(userInfo authenticationv1.UserInfo, workspace *tenantv1alpha1.Workspace) error {
+func AuthorizeModification(userInfo authenticationv1.UserInfo, workspace *tenantv1alpha1.Workspace, operatorSA string) error {
 	if isPrivileged(userInfo) {
 		return nil
 	}
 
-	if userInfo.Username == OperatorServiceAccount {
+	if userInfo.Username == operatorSA {
 		return nil
 	}
 
