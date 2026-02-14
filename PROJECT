@@ -18,12 +18,4 @@ resources:
   kind: Workspace
   path: github.com/otterscale/otterscale-operator/api/tenant/v1alpha1
   version: v1alpha1
-- api:
-    crdVersion: v1
-  controller: true
-  domain: otterscale.io
-  group: addons
-  kind: Module
-  path: github.com/otterscale/otterscale-operator/api/addons/v1alpha1
-  version: v1alpha1
 version: "3"
