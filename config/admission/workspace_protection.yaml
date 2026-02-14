@@ -21,5 +21,4 @@ spec:
         || request.userInfo.groups.exists(g, g in ['system:masters', 'kubeadm:cluster-admins'])
         || request.userInfo.username == 'system:serviceaccount:otterscale-system:otterscale-operator-controller-manager'
         || (has(oldObject.metadata.annotations) && oldObject.metadata.annotations['tenant.otterscale.io/allow-delete'] == 'true')
-        || oldObject.spec.deletionPolicy == 'DeleteNamespace'
-      message: "workspace deletion is protected; set annotation 'tenant.otterscale.io/allow-delete=true' or spec.deletionPolicy='DeleteNamespace' to proceed."
+      message: "workspace deletion is protected; set annotation 'tenant.otterscale.io/allow-delete=true' to proceed."
