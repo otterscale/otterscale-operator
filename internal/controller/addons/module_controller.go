@@ -48,7 +48,7 @@ import (
 
 const (
 	defaultTemplatesConfigMapName      = "otterscale-modules"
-	defaultTemplatesConfigMapNamespace = "otterscale-operator-system"
+	defaultTemplatesConfigMapNamespace = "otterscale-system"
 	templatesConfigMapDataKey          = "modules.yaml"
 	defaultFluxNamespace               = "flux-system"
 

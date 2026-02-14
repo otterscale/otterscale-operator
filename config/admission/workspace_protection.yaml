@@ -13,13 +13,13 @@ spec:
   validations:
     - expression: >-
         request.userInfo.groups.exists(g, g in ['system:masters', 'kubeadm:cluster-admins'])
-        || request.userInfo.username == 'system:serviceaccount:otterscale-operator-system:otterscale-operator-controller-manager'
+        || request.userInfo.username == 'system:serviceaccount:otterscale-system:otterscale-operator-controller-manager'
         || oldObject.spec.users.exists(u, u.subject == request.userInfo.username && u.role == 'admin')
       message: "only users with the 'admin' role defined in this workspace can modify or delete it."
     - expression: >-
         request.operation != 'DELETE'
         || request.userInfo.groups.exists(g, g in ['system:masters', 'kubeadm:cluster-admins'])
-        || request.userInfo.username == 'system:serviceaccount:otterscale-operator-system:otterscale-operator-controller-manager'
+        || request.userInfo.username == 'system:serviceaccount:otterscale-system:otterscale-operator-controller-manager'
         || (has(oldObject.metadata.annotations) && oldObject.metadata.annotations['tenant.otterscale.io/allow-delete'] == 'true')
         || oldObject.spec.deletionPolicy == 'DeleteNamespace'
       message: "workspace deletion is protected; set annotation 'tenant.otterscale.io/allow-delete=true' or spec.deletionPolicy='DeleteNamespace' to proceed."

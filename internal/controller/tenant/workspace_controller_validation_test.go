@@ -62,7 +62,7 @@ var _ = Describe("Workspace Controller - CEL Validation", func() {
 	})
 
 	Context("Admission Policy - Service Account Exemption", func() {
-		const controllerServiceAccount = "system:serviceaccount:otterscale-operator-system:otterscale-operator-controller-manager"
+		const controllerServiceAccount = "system:serviceaccount:otterscale-system:otterscale-operator-controller-manager"
 
 		createImpersonatedClient := func(user string, groups []string) client.Client {
 			cfgCopy := *cfg

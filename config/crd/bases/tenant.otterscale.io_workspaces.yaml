@@ -146,7 +146,7 @@ spec:
                 - message: namespace is immutable
                   rule: self == oldSelf
                 - message: namespace is reserved and cannot be used for a workspace
-                  rule: '!(self in [''default'',''kube-system'',''kube-public'',''kube-node-lease'',''otterscale-operator-system''])'
+                  rule: '!(self in [''default'',''kube-system'',''kube-public'',''kube-node-lease'',''otterscale-system''])'
               networkIsolation:
                 description: NetworkIsolation defines the ingress traffic rules for
                   the workspace.
