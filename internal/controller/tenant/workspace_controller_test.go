@@ -80,8 +80,7 @@ var _ = Describe("Workspace Controller", func() {
 	}
 
 	fullyReconcile := func() {
-		executeReconcile() // 1) syncs user labels
-		executeReconcile() // 2) provisions resources + updates status
+		executeReconcile() // provisions resources + updates status
 	}
 
 	fetchResource := func(obj client.Object, name, namespace string) {
@@ -152,13 +151,9 @@ var _ = Describe("Workspace Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: namespaceName},
 			})).To(Succeed())
 
-			By("Running reconciliation until it hits the namespace conflict")
+			By("Running reconciliation - namespace conflict is a permanent error: should NOT return error (no requeue)")
 			nsName := types.NamespacedName{Name: resourceName}
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
-			Expect(err).NotTo(HaveOccurred()) // sync labels
-
-			// Namespace conflict is a permanent error: should NOT return error (no requeue)
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying the status condition is updated")
@@ -299,136 +294,6 @@ var _ = Describe("Workspace Controller", func() {
 			err := viewClient.Update(ctx, &latestWs)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("only users with the 'admin' role"))
-		})
-	})
-
-	Context("Member Label Synchronization", func() {
-		BeforeEach(func() {
-			workspace = makeWorkspace(resourceName, namespaceName, func(w *tenantv1alpha1.Workspace) {
-				w.Spec.Members = []tenantv1alpha1.WorkspaceMember{
-					{Role: tenantv1alpha1.MemberRoleAdmin, Subject: adminUser},
-					{Role: tenantv1alpha1.MemberRoleView, Subject: viewUser},
-				}
-			})
-		})
-
-		It("should mirror member subjects as labels and preserve custom labels", func() {
-			By("Adding a custom label to the workspace before reconciliation")
-			fetchResource(workspace, resourceName, "")
-			if workspace.Labels == nil {
-				workspace.Labels = make(map[string]string)
-			}
-			workspace.Labels["my-custom-label"] = "my-custom-value"
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-			executeReconcile()
-
-			By("Fetching the reconciled Workspace")
-			fetchResource(workspace, resourceName, "")
-
-			By("Verifying member labels are created")
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+adminUser, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+viewUser, "true"))
-
-			By("Verifying the custom label is preserved")
-			Expect(workspace.Labels).To(HaveKeyWithValue("my-custom-label", "my-custom-value"))
-		})
-
-		It("should update labels when members are added", func() {
-			executeReconcile()
-			executeReconcile()
-
-			By("Adding a new member")
-			newUser := "editor-user"
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Members = append(workspace.Spec.Members, tenantv1alpha1.WorkspaceMember{
-				Role:    tenantv1alpha1.MemberRoleEdit,
-				Subject: newUser,
-			})
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-
-			By("Verifying new member label is added")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+newUser, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+adminUser, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+viewUser, "true"))
-		})
-
-		It("should update labels when members are removed", func() {
-			executeReconcile()
-			executeReconcile()
-
-			By("Removing the view member")
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Members = []tenantv1alpha1.WorkspaceMember{
-				{Role: tenantv1alpha1.MemberRoleAdmin, Subject: adminUser},
-			}
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-
-			By("Verifying removed member label is gone")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+adminUser, "true"))
-			Expect(workspace.Labels).NotTo(HaveKey(ws.UserLabelPrefix + viewUser))
-		})
-
-		It("should update labels when member list is completely replaced", func() {
-			executeReconcile()
-			executeReconcile()
-
-			By("Replacing all members")
-			newUser1 := "new-admin"
-			newUser2 := "new-editor"
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Members = []tenantv1alpha1.WorkspaceMember{
-				{Role: tenantv1alpha1.MemberRoleAdmin, Subject: newUser1},
-				{Role: tenantv1alpha1.MemberRoleEdit, Subject: newUser2},
-			}
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-
-			By("Verifying labels reflect new members only")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+newUser1, "true"))
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+newUser2, "true"))
-			Expect(workspace.Labels).NotTo(HaveKey(ws.UserLabelPrefix + adminUser))
-			Expect(workspace.Labels).NotTo(HaveKey(ws.UserLabelPrefix + viewUser))
-		})
-
-		It("should handle members with special characters in their subject", func() {
-			specialUser := "user.example.com"
-			By("Updating workspace with special member")
-			fetchResource(workspace, resourceName, "")
-			workspace.Spec.Members = []tenantv1alpha1.WorkspaceMember{
-				{Role: tenantv1alpha1.MemberRoleAdmin, Subject: specialUser},
-			}
-			Expect(k8sClient.Update(ctx, workspace)).To(Succeed())
-
-			executeReconcile()
-			executeReconcile()
-
-			By("Verifying special character handling")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(HaveKeyWithValue(ws.UserLabelPrefix+specialUser, "true"))
-		})
-
-		It("should not cause infinite reconciliation loops", func() {
-			fullyReconcile()
-
-			By("Getting the labels after full reconciliation")
-			fetchResource(workspace, resourceName, "")
-			firstLabels := workspace.Labels
-
-			executeReconcile()
-
-			By("Verifying labels are stable after third reconcile")
-			fetchResource(workspace, resourceName, "")
-			Expect(workspace.Labels).To(Equal(firstLabels))
 		})
 	})
 

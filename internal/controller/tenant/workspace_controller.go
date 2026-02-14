@@ -66,7 +66,10 @@ type WorkspaceReconciler struct {
 
 // Reconcile is the main loop for the controller.
 // It implements the level-triggered reconciliation logic with a thin orchestration pattern:
-// Fetch -> Label Sync -> Domain Sync -> Status Update.
+// Fetch -> Domain Sync -> Status Update.
+//
+// Member-to-label synchronization is handled by the Mutating Webhook (WorkspaceCustomDefaulter),
+// ensuring labels are always consistent before the object reaches etcd.
 //
 // Deletion is handled entirely by Kubernetes garbage collection: all child resources
 // are created with OwnerReferences pointing to the Workspace, so they are automatically
@@ -81,23 +84,12 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// 2. Reconcile Self Labels (Label Mirroring)
-	updated, err := ws.ReconcileUserLabels(ctx, r.Client, &w)
-	if err != nil {
-		r.setReadyConditionFalse(ctx, &w, "LabelSyncError", err.Error())
-		return ctrl.Result{}, err
-	}
-	if updated {
-		// Labels were patched; the resulting watch event will trigger the next reconcile.
-		return ctrl.Result{}, nil
-	}
-
-	// 3. Reconcile all domain resources
+	// 2. Reconcile all domain resources
 	if err := r.reconcileResources(ctx, &w); err != nil {
 		return r.handleReconcileError(ctx, &w, err)
 	}
 
-	// 4. Update Status (Reflect the observed state back to the user)
+	// 3. Update Status (Reflect the observed state back to the user)
 	if err := r.updateStatus(ctx, &w); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -167,12 +159,10 @@ func (r *WorkspaceReconciler) SetupWithManager(mgr ctrl.Manager) (err error) {
 
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&tenantv1alpha1.Workspace{}).
-		// Use a custom predicate that triggers on spec changes (generation bump)
-		// OR metadata changes (labels for user sync). This filters out status-only updates.
-		WithEventFilter(predicate.Or(
-			predicate.GenerationChangedPredicate{},
-			predicate.LabelChangedPredicate{},
-		)).
+		// Filter out status-only updates: only reconcile on spec changes (generation bump).
+		// Label synchronization is handled by the mutating webhook, so we no longer need
+		// to watch for label changes.
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		// Watch for changes in owned resources to trigger reconciliation
 		Owns(&corev1.Namespace{}).
 		Owns(&corev1.ResourceQuota{}).

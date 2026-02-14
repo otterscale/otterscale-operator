@@ -18,11 +18,15 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 )
 
 // nolint:unused
@@ -31,29 +35,63 @@ var workspacelog = logf.Log.WithName("workspace-resource")
 
 // SetupWorkspaceWebhookWithManager registers the webhook for Workspace in the manager.
 func SetupWorkspaceWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &tenantv1alpha1.Workspace{}).
+	return ctrl.NewWebhookManagedBy(mgr).
+		For(&tenantv1alpha1.Workspace{}).
 		WithDefaulter(&WorkspaceCustomDefaulter{}).
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-
 // +kubebuilder:webhook:path=/mutate-tenant-otterscale-io-v1alpha1-workspace,mutating=true,failurePolicy=fail,sideEffects=None,groups=tenant.otterscale.io,resources=workspaces,verbs=create;update,versions=v1alpha1,name=mworkspace-v1alpha1.kb.io,admissionReviewVersions=v1
 
-// WorkspaceCustomDefaulter struct is responsible for setting default values on the custom resource of the
-// Kind Workspace when those are created or updated.
+// WorkspaceCustomDefaulter is responsible for setting default values on the Workspace resource
+// during CREATE and UPDATE operations. It synchronizes member subjects as labels to enable
+// external API label selectors (e.g., "find all workspaces a user belongs to").
 //
 // NOTE: The +kubebuilder:object:generate=false marker prevents controller-gen from generating DeepCopy methods,
 // as it is used only for temporary operations and does not need to be deeply copied.
-type WorkspaceCustomDefaulter struct {
-	// TODO(user): Add more fields as needed for defaulting
+type WorkspaceCustomDefaulter struct{}
+
+// Default implements admission.CustomDefaulter so a webhook will be registered for the Kind Workspace.
+// It ensures that labels with the prefix "user.otterscale.io/" mirror the current member subjects,
+// removing stale entries and preserving all other labels.
+func (d *WorkspaceCustomDefaulter) Default(_ context.Context, obj runtime.Object) error {
+	workspace, ok := obj.(*tenantv1alpha1.Workspace)
+	if !ok {
+		return fmt.Errorf("expected a Workspace object but got %T", obj)
+	}
+	workspacelog.Info("Defaulting for Workspace", "name", workspace.GetName())
+
+	defaultMemberLabels(workspace)
+	return nil
 }
 
-// Default implements webhook.CustomDefaulter so a webhook will be registered for the Kind Workspace.
-func (d *WorkspaceCustomDefaulter) Default(_ context.Context, obj *tenantv1alpha1.Workspace) error {
-	workspacelog.Info("Defaulting for Workspace", "name", obj.GetName())
+// defaultMemberLabels synchronizes member subjects as labels on the Workspace.
+// Labels with the prefix "user.otterscale.io/" are managed; all other labels are preserved.
+func defaultMemberLabels(workspace *tenantv1alpha1.Workspace) {
+	labels := workspace.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
 
-	// TODO(user): fill in your defaulting logic.
+	// Build desired user labels from spec
+	desired := make(map[string]struct{}, len(workspace.Spec.Members))
+	for _, m := range workspace.Spec.Members {
+		desired[ws.UserLabelPrefix+m.Subject] = struct{}{}
+	}
 
-	return nil
+	// Remove stale user labels
+	for k := range labels {
+		if strings.HasPrefix(k, ws.UserLabelPrefix) {
+			if _, ok := desired[k]; !ok {
+				delete(labels, k)
+			}
+		}
+	}
+
+	// Set desired user labels
+	for k := range desired {
+		labels[k] = "true"
+	}
+
+	workspace.SetLabels(labels)
 }
