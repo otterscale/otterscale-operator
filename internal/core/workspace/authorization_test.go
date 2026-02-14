@@ -127,3 +127,4 @@ func TestAuthorizeModification_EmptyMembers(t *testing.T) {
 		t.Errorf("AuthorizeModification() unexpected error for privileged user: %v", err)
 	}
 }
+

@@ -32,6 +32,10 @@ const (
 	AuthorizationPolicyName = "workspace-authorization-policy"
 
 	UserLabelPrefix = "user.otterscale.io/"
+
+	// ConditionTypeReady is the condition type that indicates whether all
+	// workspace resources have been successfully reconciled.
+	ConditionTypeReady = "Ready"
 )
 
 // LabelsForWorkspace returns a standard set of labels for resources managed by this operator.

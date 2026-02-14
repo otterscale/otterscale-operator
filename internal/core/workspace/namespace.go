@@ -61,9 +61,13 @@ func ReconcileNamespace(ctx context.Context, c client.Client, scheme *runtime.Sc
 
 		maps.Copy(namespace.Labels, LabelsForWorkspace(w.Name, version))
 
-		// Enable Istio sidecar injection if Istio is detected
+		// Enable or disable Istio sidecar injection based on detection.
+		// Explicitly removing the label when Istio is absent ensures that
+		// namespaces are cleaned up after Istio is uninstalled from the cluster.
 		if istioEnabled {
 			namespace.Labels["istio-injection"] = "enabled"
+		} else {
+			delete(namespace.Labels, "istio-injection")
 		}
 
 		// Set OwnerReference to ensure garbage collection works

@@ -68,15 +68,21 @@ var _ = Describe("IstioDetector", func() {
 
 	Context("Refresh", func() {
 		It("should preserve previous state on unreachable API server", func() {
-			detector := &IstioDetector{
-				config: &rest.Config{Host: "https://127.0.0.1:1"},
-			}
+			// Create a detector with a cached DiscoveryClient pointing to an unreachable host.
+			detector := NewIstioDetector(&rest.Config{Host: "https://127.0.0.1:1"})
 
 			By("Manually enabling and then refreshing against unreachable server")
 			detector.enabled.Store(true)
 			detector.Refresh()
 
 			By("State should be preserved (not flapped to false)")
+			Expect(detector.IsEnabled()).To(BeTrue())
+		})
+
+		It("should be a no-op when dc is nil", func() {
+			detector := &IstioDetector{}
+			detector.enabled.Store(true)
+			detector.Refresh()
 			Expect(detector.IsEnabled()).To(BeTrue())
 		})
 	})

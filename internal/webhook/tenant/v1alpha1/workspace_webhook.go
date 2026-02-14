@@ -37,10 +37,9 @@ var workspacelog = logf.Log.WithName("workspace-resource")
 
 // SetupWorkspaceWebhookWithManager registers the webhook for Workspace in the manager.
 func SetupWorkspaceWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&tenantv1alpha1.Workspace{}).
-		WithDefaulter(&WorkspaceCustomDefaulter{}).
-		WithValidator(&WorkspaceCustomValidator{}).
+	return ctrl.NewWebhookManagedBy(mgr, &tenantv1alpha1.Workspace{}).
+		WithCustomDefaulter(&WorkspaceCustomDefaulter{}).
+		WithCustomValidator(&WorkspaceCustomValidator{}).
 		Complete()
 }
 

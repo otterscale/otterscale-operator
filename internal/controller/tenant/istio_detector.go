@@ -19,6 +19,7 @@ package tenant
 import (
 	"sync/atomic"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
 )
@@ -26,14 +27,24 @@ import (
 // IstioDetector provides a thread-safe way to check whether Istio CRDs are available
 // in the cluster. It uses an atomic boolean that is refreshed via the Discovery API
 // whenever a relevant CRD event is observed.
+//
+// The DiscoveryClient is cached to avoid creating a new HTTP client on every Refresh.
 type IstioDetector struct {
-	config  *rest.Config
+	dc      *discovery.DiscoveryClient
 	enabled atomic.Bool
 }
 
 // NewIstioDetector creates an IstioDetector and performs an initial availability check.
+// If the DiscoveryClient cannot be created (e.g., nil config in tests), the detector
+// defaults to disabled and Refresh becomes a no-op.
 func NewIstioDetector(config *rest.Config) *IstioDetector {
-	d := &IstioDetector{config: config}
+	d := &IstioDetector{}
+	if config != nil {
+		dc, err := discovery.NewDiscoveryClientForConfig(config)
+		if err == nil {
+			d.dc = dc
+		}
+	}
 	d.Refresh()
 	return d
 }
@@ -47,28 +58,31 @@ func (d *IstioDetector) IsEnabled() bool {
 // On error the previous state is preserved; this is intentional to avoid flapping
 // caused by transient API-server issues.
 func (d *IstioDetector) Refresh() {
-	enabled, err := checkIstioEnabled(d.config)
-	if err != nil {
-		// Keep the previous state on transient errors.
+	if d.dc == nil {
 		return
 	}
-	d.enabled.Store(enabled)
+	supported, definitive := isResourceSupported(d.dc, "security.istio.io/v1")
+	if definitive {
+		d.enabled.Store(supported)
+	}
+	// Non-definitive result (transient error): keep previous state to avoid flapping.
 }
 
-// checkIstioEnabled checks if Istio is installed in the cluster.
-func checkIstioEnabled(c *rest.Config) (bool, error) {
-	dc, err := discovery.NewDiscoveryClientForConfig(c)
-	if err != nil {
-		return false, err
+// isResourceSupported checks if a CRD group version exists in the cluster.
+// It returns whether the group is supported and whether the answer is definitive.
+// When the API server responds with a status code (e.g. 404 Not Found), the result
+// is definitive. Transport-level errors (connection refused, timeout) are transient
+// and the caller should preserve the previous state.
+func isResourceSupported(dc *discovery.DiscoveryClient, groupVersion string) (supported bool, definitive bool) {
+	_, err := dc.ServerResourcesForGroupVersion(groupVersion)
+	if err == nil {
+		return true, true
 	}
-	return isResourceSupported(dc, "security.istio.io/v1"), nil
-}
-
-// isResourceSupported checks if a CRD exists in the cluster.
-// This allows the controller to adapt its behavior based on the environment.
-func isResourceSupported(dc *discovery.DiscoveryClient, groupVersion string) bool {
-	if _, err := dc.ServerResourcesForGroupVersion(groupVersion); err != nil {
-		return false
+	// If the API server responded with a HTTP status error, the determination is
+	// definitive: the group version does not exist.
+	if apierrors.IsNotFound(err) || apierrors.ReasonForError(err) != "" {
+		return false, true
 	}
-	return true
+	// Transport-level error (e.g. connection refused, timeout) — not definitive.
+	return false, false
 }

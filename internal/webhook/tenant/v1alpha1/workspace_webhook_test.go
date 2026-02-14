@@ -175,9 +175,8 @@ var _ = Describe("Workspace Webhook", func() {
 	// The tests below only verify the type-assertion guard in each method.
 
 	Context("Validating Webhook type guards", func() {
-		It("should return error when ValidateCreate receives a non-Workspace object", func() {
+		It("should accept any object type in ValidateCreate since it is a no-op", func() {
 			_, err := validator.ValidateCreate(context.Background(), &tenantv1alpha1.WorkspaceList{})
-			// ValidateCreate is a no-op that accepts any runtime.Object; no error expected.
 			Expect(err).NotTo(HaveOccurred())
 		})
 

@@ -17,6 +17,7 @@ limitations under the License.
 package tenant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -143,7 +144,7 @@ func (r *WorkspaceReconciler) setReadyConditionFalse(ctx context.Context, w *ten
 
 	patch := client.MergeFrom(w.DeepCopy())
 	meta.SetStatusCondition(&w.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               ws.ConditionTypeReady,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,
@@ -316,7 +317,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 
 	// Set Ready condition
 	meta.SetStatusCondition(&newStatus.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               ws.ConditionTypeReady,
 		Status:             metav1.ConditionTrue,
 		Reason:             "Reconciled",
 		Message:            "Workspace resources are successfully reconciled",
@@ -325,13 +326,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 
 	// Sort conditions by type for stable ordering
 	slices.SortFunc(newStatus.Conditions, func(a, b metav1.Condition) int {
-		if a.Type < b.Type {
-			return -1
-		}
-		if a.Type > b.Type {
-			return 1
-		}
-		return 0
+		return cmp.Compare(a.Type, b.Type)
 	})
 
 	// Check for changes before making an API call to reduce load on the API server
