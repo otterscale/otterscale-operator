@@ -98,7 +98,7 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable"
-	// +kubebuilder:validation:XValidation:rule="!(self in ['default','kube-system','kube-public','kube-node-lease','otterscale-operator-system'])",message="namespace is reserved and cannot be used for a workspace"
+	// +kubebuilder:validation:XValidation:rule="!(self in ['default','kube-system','kube-public','kube-node-lease','otterscale-system'])",message="namespace is reserved and cannot be used for a workspace"
 	// +required
 	Namespace string `json:"namespace"`
 

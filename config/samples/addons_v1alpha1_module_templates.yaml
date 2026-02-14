@@ -3,8 +3,8 @@ kind: ConfigMap
 metadata:
   name: otterscale-modules
   # This ConfigMap is typically created in the operator's namespace.
-  # In the default kustomize overlay, that's `otterscale-operator-system`.
-  namespace: otterscale-operator-system
+  # In the default kustomize overlay, that's `otterscale-system`.
+  namespace: otterscale-system
 data:
   # A list of module templates. Each entry contains a single Kubernetes manifest
   # for either a Flux Kustomization or HelmRelease.

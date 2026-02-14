@@ -37,4 +37,4 @@ spec:
         type: Container
   networkIsolation:
     enabled: true
-    allowedNamespaces: ["kube-system", "otterscale-operator-system"]
+    allowedNamespaces: ["kube-system", "otterscale-system"]
