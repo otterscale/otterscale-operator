@@ -97,9 +97,9 @@ var _ = Describe("Workspace Controller", func() {
 		resourceName = string(uuid.NewUUID())
 		namespaceName = string(uuid.NewUUID())
 		reconciler = &WorkspaceReconciler{
-			Client:       k8sClient,
-			Scheme:       k8sClient.Scheme(),
-			istioEnabled: false,
+			Client:        k8sClient,
+			Scheme:        k8sClient.Scheme(),
+			istioDetector: &IstioDetector{}, // defaults to disabled (no Istio in envtest)
 		}
 		workspace = makeWorkspace(resourceName, namespaceName)
 	})

@@ -17,46 +17,42 @@ limitations under the License.
 package tenant
 
 import (
-	"context"
-	"errors"
-	"time"
+	"sync/atomic"
 
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/rest"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type IstioPoller struct {
-	Config   *rest.Config
-	Interval time.Duration
+// IstioDetector provides a thread-safe way to check whether Istio CRDs are available
+// in the cluster. It uses an atomic boolean that is refreshed via the Discovery API
+// whenever a relevant CRD event is observed.
+type IstioDetector struct {
+	config  *rest.Config
+	enabled atomic.Bool
 }
 
-func (p *IstioPoller) Start(ctx context.Context) error {
-	logger := log.FromContext(ctx).WithName("IstioPoller")
+// NewIstioDetector creates an IstioDetector and performs an initial availability check.
+func NewIstioDetector(config *rest.Config) *IstioDetector {
+	d := &IstioDetector{config: config}
+	d.Refresh()
+	return d
+}
 
-	logger.Info("Starting Istio detection poller...")
+// IsEnabled returns whether Istio CRDs are currently available in the cluster.
+func (d *IstioDetector) IsEnabled() bool {
+	return d.enabled.Load()
+}
 
-	ticker := time.NewTicker(p.Interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("Stopping Istio poller")
-			return nil
-
-		case <-ticker.C:
-			enabled, err := checkIstioEnabled(p.Config)
-			if err != nil {
-				logger.Error(err, "Error checking Istio status")
-				continue
-			}
-			if enabled {
-				logger.Info("Istio detected via polling! Restarting operator...")
-				return errors.New("istio detected, restarting operator")
-			}
-		}
+// Refresh re-checks Istio CRD availability via the Discovery API and updates the flag.
+// On error the previous state is preserved; this is intentional to avoid flapping
+// caused by transient API-server issues.
+func (d *IstioDetector) Refresh() {
+	enabled, err := checkIstioEnabled(d.config)
+	if err != nil {
+		// Keep the previous state on transient errors.
+		return
 	}
+	d.enabled.Store(enabled)
 }
 
 // checkIstioEnabled checks if Istio is installed in the cluster.
@@ -65,7 +61,7 @@ func checkIstioEnabled(c *rest.Config) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return isResourceSupported(dc, "networking.istio.io/v1beta1"), nil
+	return isResourceSupported(dc, "security.istio.io/v1"), nil
 }
 
 // isResourceSupported checks if a CRD exists in the cluster.
