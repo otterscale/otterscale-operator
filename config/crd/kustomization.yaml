@@ -3,6 +3,8 @@
 # It should be run by config/default
 resources:
 - bases/tenant.otterscale.io_workspaces.yaml
+- bases/addons.otterscale.io_modules.yaml
+- bases/addons.otterscale.io_moduletemplates.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

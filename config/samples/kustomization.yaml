@@ -1,4 +1,6 @@
 ## Append samples of your project ##
 resources:
 - tenant_v1alpha1_workspace.yaml
+- addons_v1alpha1_module.yaml
+- addons_v1alpha1_moduletemplate.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

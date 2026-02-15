@@ -36,10 +36,14 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
+	istiosecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
+	addonsv1alpha1 "github.com/otterscale/otterscale-operator/api/addons/v1alpha1"
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	addonscontroller "github.com/otterscale/otterscale-operator/internal/controller/addons"
 	tenantcontroller "github.com/otterscale/otterscale-operator/internal/controller/tenant"
 	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 	webhooktenantv1alpha1 "github.com/otterscale/otterscale-operator/internal/webhook/tenant/v1alpha1"
@@ -53,10 +57,22 @@ var (
 )
 
 func init() {
+	// Add the core Kubernetes API groups
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+
+	// Add the API extensions API groups
 	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
-	utilruntime.Must(istioapisecurityv1.AddToScheme(scheme))
+
+	// Add the Istio API groups
+	utilruntime.Must(istiosecurityv1.AddToScheme(scheme))
+
+	// Add the Flux API groups
+	utilruntime.Must(helmv2.AddToScheme(scheme))
+	utilruntime.Must(kustomizev1.AddToScheme(scheme))
+
+	// Add the OtterScale API groups
 	utilruntime.Must(tenantv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(addonsv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -209,6 +225,13 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Workspace")
 			os.Exit(1)
 		}
+	}
+	if err := (&addonscontroller.ModuleReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Module")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
