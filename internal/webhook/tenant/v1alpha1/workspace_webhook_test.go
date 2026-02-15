@@ -31,7 +31,6 @@ var _ = Describe("Workspace Webhook", func() {
 	var (
 		obj       *tenantv1alpha1.Workspace
 		defaulter WorkspaceCustomDefaulter
-		validator WorkspaceCustomValidator
 	)
 
 	BeforeEach(func() {
@@ -45,8 +44,6 @@ var _ = Describe("Workspace Webhook", func() {
 			},
 		}
 		defaulter = WorkspaceCustomDefaulter{}
-		validator = WorkspaceCustomValidator{OperatorSA: "system:serviceaccount:test-system:test-controller-manager"}
-		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
 	})
 
 	Context("Member Label Synchronization", func() {
@@ -160,37 +157,12 @@ var _ = Describe("Workspace Webhook", func() {
 			Expect(obj.Labels).To(Equal(firstLabels))
 		})
 
-		It("should return error for non-Workspace objects", func() {
-			err := defaulter.Default(context.Background(), &tenantv1alpha1.WorkspaceList{})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("expected a Workspace object"))
-		})
 	})
-	// Workspace authorization (admin-only update/delete) is exercised via pure
-	// Go unit tests in internal/core/workspace/authorization_test.go. The webhook
-	// layer is a thin adapter that extracts UserInfo from the admission context
-	// and delegates to those functions, so integration-level tests through
-	// envtest are the appropriate place to validate the full admission chain.
-	//
-	// The tests below only verify the type-assertion guard in each method.
 
-	Context("Validating Webhook type guards", func() {
-		It("should accept any object type in ValidateCreate since it is a no-op", func() {
-			_, err := validator.ValidateCreate(context.Background(), &tenantv1alpha1.WorkspaceList{})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("should return error when ValidateUpdate receives a non-Workspace oldObj", func() {
-			_, err := validator.ValidateUpdate(context.Background(), &tenantv1alpha1.WorkspaceList{}, obj)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("expected a Workspace object"))
-		})
-
-		It("should return error when ValidateDelete receives a non-Workspace object", func() {
-			_, err := validator.ValidateDelete(context.Background(), &tenantv1alpha1.WorkspaceList{})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("expected a Workspace object"))
-		})
-	})
+	// NOTE: Type-assertion guard tests have been removed because the webhook
+	// methods now use the generic typed interface (admission.Defaulter[*Workspace]
+	// / admission.Validator[*Workspace]), so the compiler enforces type safety at
+	// build time. Workspace authorization (admin-only update/delete) is exercised
+	// via pure Go unit tests in internal/core/workspace/authorization_test.go.
 
 })

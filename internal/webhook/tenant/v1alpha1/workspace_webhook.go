@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -37,8 +36,8 @@ import (
 // used to exempt the operator's own reconciliation updates from workspace-level authorization.
 func SetupWorkspaceWebhookWithManager(mgr ctrl.Manager, operatorSA string) error {
 	return ctrl.NewWebhookManagedBy(mgr, &tenantv1alpha1.Workspace{}).
-		WithCustomDefaulter(&WorkspaceCustomDefaulter{}).
-		WithCustomValidator(&WorkspaceCustomValidator{OperatorSA: operatorSA}).
+		WithDefaulter(&WorkspaceCustomDefaulter{}).
+		WithValidator(&WorkspaceCustomValidator{OperatorSA: operatorSA}).
 		Complete()
 }
 
@@ -52,14 +51,10 @@ func SetupWorkspaceWebhookWithManager(mgr ctrl.Manager, operatorSA string) error
 // as it is used only for temporary operations and does not need to be deeply copied.
 type WorkspaceCustomDefaulter struct{}
 
-// Default implements admission.CustomDefaulter so a webhook will be registered for the Kind Workspace.
+// Default implements admission.Defaulter[*tenantv1alpha1.Workspace] so a webhook will be registered for the Kind Workspace.
 // It ensures that labels with the prefix "user.otterscale.io/" mirror the current member subjects,
 // removing stale entries and preserving all other labels.
-func (d *WorkspaceCustomDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	workspace, ok := obj.(*tenantv1alpha1.Workspace)
-	if !ok {
-		return fmt.Errorf("expected a Workspace object but got %T", obj)
-	}
+func (d *WorkspaceCustomDefaulter) Default(ctx context.Context, workspace *tenantv1alpha1.Workspace) error {
 	log.FromContext(ctx).Info("Defaulting for Workspace", "name", workspace.GetName())
 
 	defaultMemberLabels(workspace)
@@ -113,22 +108,14 @@ type WorkspaceCustomValidator struct {
 
 // ValidateCreate is a no-op. Any authenticated user that passes RBAC is allowed
 // to create a Workspace; there is no ownership to protect yet.
-func (v *WorkspaceCustomValidator) ValidateCreate(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (v *WorkspaceCustomValidator) ValidateCreate(_ context.Context, _ *tenantv1alpha1.Workspace) (admission.Warnings, error) {
 	return nil, nil
 }
 
 // ValidateUpdate ensures only workspace admins (or privileged identities) can
 // modify an existing Workspace. The check uses oldObj so that a user cannot
 // grant themselves admin and approve in the same request.
-func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	oldWorkspace, ok := oldObj.(*tenantv1alpha1.Workspace)
-	if !ok {
-		return nil, fmt.Errorf("expected a Workspace object but got %T", oldObj)
-	}
-	newWorkspace, ok := newObj.(*tenantv1alpha1.Workspace)
-	if !ok {
-		return nil, fmt.Errorf("expected a Workspace object but got %T", newObj)
-	}
+func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldWorkspace, newWorkspace *tenantv1alpha1.Workspace) (admission.Warnings, error) {
 	log.FromContext(ctx).Info("Validating Workspace update", "name", newWorkspace.GetName())
 
 	req, err := admission.RequestFromContext(ctx)
@@ -145,11 +132,7 @@ func (v *WorkspaceCustomValidator) ValidateUpdate(ctx context.Context, oldObj, n
 
 // ValidateDelete ensures only workspace admins (or privileged identities) can
 // delete a Workspace.
-func (v *WorkspaceCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	workspace, ok := obj.(*tenantv1alpha1.Workspace)
-	if !ok {
-		return nil, fmt.Errorf("expected a Workspace object but got %T", obj)
-	}
+func (v *WorkspaceCustomValidator) ValidateDelete(ctx context.Context, workspace *tenantv1alpha1.Workspace) (admission.Warnings, error) {
 	log.FromContext(ctx).Info("Validating Workspace deletion", "name", workspace.GetName())
 
 	req, err := admission.RequestFromContext(ctx)
