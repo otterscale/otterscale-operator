@@ -1,16 +1,12 @@
 # Otterscale Operator
 
-[![GitHub Release](https://img.shields.io/github/v/release/otterscale/otterscale-operator?logo=github)](https://github.com/otterscale/otterscale-operator/releases)
-[![GitHub License](https://img.shields.io/github/license/otterscale/otterscale-operator?logo=github)](https://opensource.org/license/apache-2-0)
-[![Lint Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/lint.yml?logo=github&label=lint)](https://github.com/otterscale/otterscale-operator/actions/workflows/lint.yml)
-[![Test Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/test.yml?logo=github&label=test)](https://github.com/otterscale/otterscale-operator/actions/workflows/test.yml)
-[![Test E2E Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/test-e2e.yml?logo=github&label=test%20e2e)](https://github.com/otterscale/otterscale-operator/actions/workflows/test-e2e.yml)
-[![GitHub Registry](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/ghcr.yml?logo=github&label=ghcr)](https://github.com/otterscale/otterscale-operator/actions/workflows/ghcr.yml)
-
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11794/badge)](https://www.bestpractices.dev/projects/11794)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/otterscale/otterscale-operator/badge)](https://scorecard.dev/viewer/?uri=github.com/otterscale/otterscale-operator)
+[![Release](https://img.shields.io/github/v/release/otterscale/otterscale-operator?logo=github)](https://github.com/otterscale/otterscale-operator/releases)
+[![License](https://img.shields.io/github/license/otterscale/otterscale-operator?logo=github&color=blue)](https://opensource.org/license/apache-2-0)
+[![Lint Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/lint.yml?logo=github&label=lint%20workflow)](https://github.com/otterscale/otterscale-operator/actions/workflows/lint.yml)
+[![Test Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/test.yml?logo=github&label=test%20workflow)](https://github.com/otterscale/otterscale-operator/actions/workflows/test.yml)
+[![Test E2E Workflow](https://img.shields.io/github/actions/workflow/status/otterscale/otterscale-operator/test-e2e.yml?logo=github&label=test%20e2e%20workflow)](https://github.com/otterscale/otterscale-operator/actions/workflows/test-e2e.yml)
+[![Codecov](https://codecov.io/gh/otterscale/otterscale-operator/graph/badge.svg?token=I7R0YEMXER)](https://codecov.io/gh/otterscale/otterscale-operator)
 [![Go Report Card](https://goreportcard.com/badge/github.com/otterscale/otterscale-operator)](https://goreportcard.com/report/github.com/otterscale/otterscale-operator)
-[![Codecov](https://codecov.io/gh/otterscale/otterscale-operator/graph/badge.svg?token=2wcwTTorFq)](https://codecov.io/gh/otterscale/otterscale-operator)
 
 // TODO(user): Add simple overview of use/purpose
 
