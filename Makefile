@@ -61,7 +61,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
+test: manifests generate fmt vet setup-envtest download-flux-crds ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e | grep -v /cmd | grep -v /test/utils | grep -v /api) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
@@ -226,6 +226,26 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+# FluxCD root modules that ship CRD YAML files under config/crd/bases/.
+# go.mod only lists the /api sub-modules, so the root modules must be fetched
+# separately for envtest to register FluxCD CRDs.
+FLUX_CRD_MODULES ?= github.com/fluxcd/helm-controller github.com/fluxcd/kustomize-controller
+FLUX_CRD_DIR ?= $(LOCALBIN)/flux-crds
+
+.PHONY: download-flux-crds
+download-flux-crds: $(LOCALBIN) ## Download FluxCD CRD YAML files into bin/flux-crds/ for envtest.
+	@mkdir -p "$(FLUX_CRD_DIR)"
+	@for mod in $(FLUX_CRD_MODULES); do \
+		ver=$$(go list -m -f '{{.Version}}' "$${mod}/api" 2>/dev/null) || continue; \
+		cache_dir=$$(go env GOMODCACHE)/$${mod}@$${ver}/config/crd/bases; \
+		if [ ! -d "$${cache_dir}" ]; then \
+			echo "Downloading $${mod}@$${ver} ..."; \
+			GONOSUMCHECK=$${mod} go mod download "$${mod}@$${ver}"; \
+		fi; \
+		cp -f "$${cache_dir}"/*.yaml "$(FLUX_CRD_DIR)/" 2>/dev/null || true; \
+	done
+	@echo "FluxCD CRDs copied to $(FLUX_CRD_DIR)"
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.

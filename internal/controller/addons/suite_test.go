@@ -19,9 +19,7 @@ package addons
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -76,10 +74,11 @@ var _ = BeforeSuite(func() {
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
-	crdPath := filepath.Join("..", "..", "..", "config", "crd", "bases")
-	crdPaths := append([]string{crdPath}, fluxCRDPaths()...)
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     crdPaths,
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "..", "config", "crd", "bases"),
+			filepath.Join("..", "..", "..", "bin", "flux-crds"),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -127,56 +126,4 @@ func getFirstFoundEnvTestBinaryDir() string {
 		}
 	}
 	return ""
-}
-
-// fluxCRDPaths resolves the FluxCD CRD YAML directories from the Go module cache.
-// The CRDs are shipped in the root FluxCD controller modules (e.g. github.com/fluxcd/helm-controller)
-// which share the same version as their /api sub-modules listed in go.mod.
-func fluxCRDPaths() []string {
-	modCache := goModCache()
-
-	// Each entry maps an /api sub-module (listed in go.mod) to its root module
-	// that ships CRD YAML files under config/crd/bases/.
-	type fluxMod struct {
-		apiModule  string
-		rootModule string
-	}
-	mods := []fluxMod{
-		{apiModule: "github.com/fluxcd/helm-controller/api", rootModule: "github.com/fluxcd/helm-controller"},
-		{apiModule: "github.com/fluxcd/kustomize-controller/api", rootModule: "github.com/fluxcd/kustomize-controller"},
-	}
-
-	var paths []string
-	for _, m := range mods {
-		version := moduleVersion(m.apiModule)
-		if version == "" {
-			continue
-		}
-		crdDir := filepath.Join(modCache, m.rootModule+"@"+version, "config", "crd", "bases")
-		if _, err := os.Stat(crdDir); err == nil {
-			paths = append(paths, crdDir)
-		}
-	}
-	return paths
-}
-
-// moduleVersion returns the version of a Go module dependency using go list.
-func moduleVersion(module string) string {
-	out, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}", module).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// goModCache returns the Go module cache directory.
-func goModCache() string {
-	out, err := exec.Command("go", "env", "GOMODCACHE").Output()
-	if err == nil {
-		if dir := strings.TrimSpace(string(out)); dir != "" {
-			return dir
-		}
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "go", "pkg", "mod")
 }
