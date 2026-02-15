@@ -22,6 +22,12 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the otterscale-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- addons_moduletemplate_admin_role.yaml
+- addons_moduletemplate_editor_role.yaml
+- addons_moduletemplate_viewer_role.yaml
+- addons_module_admin_role.yaml
+- addons_module_editor_role.yaml
+- addons_module_viewer_role.yaml
 - tenant_workspace_admin_role.yaml
 - tenant_workspace_editor_role.yaml
 - tenant_workspace_viewer_role.yaml

@@ -1,0 +1,9 @@
+apiVersion: addons.otterscale.io/v1alpha1
+kind: ModuleTemplate
+metadata:
+  labels:
+    app.kubernetes.io/name: otterscale-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: moduletemplate-sample
+spec:
+  # TODO(user): Add fields here
