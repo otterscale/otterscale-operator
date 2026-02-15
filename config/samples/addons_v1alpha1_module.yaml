@@ -1,0 +1,15 @@
+apiVersion: addons.otterscale.io/v1alpha1
+kind: Module
+metadata:
+  name: ingress-nginx
+spec:
+  templateRef: ingress-nginx
+---
+apiVersion: addons.otterscale.io/v1alpha1
+kind: Module
+metadata:
+  name: cert-manager
+spec:
+  templateRef: cert-manager
+  # Optional: override the default namespace from the template
+  # namespace: cert-manager-custom
