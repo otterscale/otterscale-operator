@@ -17,41 +17,61 @@ limitations under the License.
 package v1alpha1
 
 import (
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// ModuleTemplateSpec defines the desired state of ModuleTemplate
-type ModuleTemplateSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of ModuleTemplate. Edit moduletemplate_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+// HelmReleaseTemplateSpec wraps the FluxCD HelmReleaseSpec for use as a module template.
+type HelmReleaseTemplateSpec struct {
+	// Spec is the FluxCD HelmRelease specification to use as a template.
+	// +required
+	Spec helmv2.HelmReleaseSpec `json:"spec"`
 }
 
-// ModuleTemplateStatus defines the observed state of ModuleTemplate.
+// KustomizationTemplateSpec wraps the FluxCD KustomizationSpec for use as a module template.
+type KustomizationTemplateSpec struct {
+	// Spec is the FluxCD Kustomization specification to use as a template.
+	// +required
+	Spec kustomizev1.KustomizationSpec `json:"spec"`
+}
+
+// ModuleTemplateSpec defines the desired state of a ModuleTemplate.
+// It serves as a reusable catalog entry for platform modules, containing either
+// a FluxCD HelmRelease or Kustomization specification.
+// +kubebuilder:validation:XValidation:rule="(has(self.helmRelease) && !has(self.kustomization)) || (!has(self.helmRelease) && has(self.kustomization))",message="exactly one of helmRelease or kustomization must be set"
+type ModuleTemplateSpec struct {
+	// Description is a human-readable description of the module template.
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Description string `json:"description,omitempty"`
+
+	// Namespace is the default target namespace where FluxCD resources will be created
+	// when a Module is instantiated from this template.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$`
+	// +required
+	Namespace string `json:"namespace"`
+
+	// HelmRelease defines the FluxCD HelmRelease spec template.
+	// Mutually exclusive with Kustomization (enforced via CEL).
+	// +optional
+	HelmRelease *HelmReleaseTemplateSpec `json:"helmRelease,omitempty"`
+
+	// Kustomization defines the FluxCD Kustomization spec template.
+	// Mutually exclusive with HelmRelease (enforced via CEL).
+	// +optional
+	Kustomization *KustomizationTemplateSpec `json:"kustomization,omitempty"`
+}
+
+// ModuleTemplateStatus defines the observed state of the ModuleTemplate.
 type ModuleTemplateStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// ObservedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the ModuleTemplate resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// Conditions store the status conditions of the ModuleTemplate.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -61,27 +81,33 @@ type ModuleTemplateStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.spec.namespace`
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// ModuleTemplate is the Schema for the moduletemplates API
+// ModuleTemplate is the Schema for the moduletemplates API.
+// A ModuleTemplate defines a reusable platform module blueprint containing either
+// a FluxCD HelmRelease or Kustomization specification. Users create Module CRs
+// to instantiate and deploy modules from these templates.
 type ModuleTemplate struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// metadata is a standard object metadata
+	// Standard object's metadata.
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of ModuleTemplate
+	// Spec defines the module template blueprint.
 	// +required
 	Spec ModuleTemplateSpec `json:"spec"`
 
-	// status defines the observed state of ModuleTemplate
+	// Status represents the current information about the ModuleTemplate.
 	// +optional
 	Status ModuleTemplateStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// ModuleTemplateList contains a list of ModuleTemplate
+// ModuleTemplateList contains a list of ModuleTemplate resources.
 type ModuleTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
