@@ -31,6 +31,8 @@ const (
 	// have been successfully reconciled and are healthy.
 	ConditionTypeReady = "Ready"
 
+	// LabelName identifies the application name (Kubernetes Recommended Label).
+	LabelName = "app.kubernetes.io/name"
 	// LabelManagedBy identifies the operator that manages the resource.
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 	// LabelPartOf identifies the higher-level application this resource belongs to.
@@ -69,6 +71,7 @@ func (e *TemplateInvalidError) Error() string {
 // LabelsForModule returns a standard set of labels for resources managed by a Module.
 func LabelsForModule(moduleName, templateName, version string) map[string]string {
 	return map[string]string{
+		LabelName:           "module",
 		LabelManagedBy:      "otterscale-operator",
 		LabelPartOf:         "otterscale",
 		LabelComponent:      "module",

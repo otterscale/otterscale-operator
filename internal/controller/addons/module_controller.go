@@ -91,8 +91,9 @@ func (r *ModuleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// 3. Ensure Finalizer is present
 	if !ctrlutil.ContainsFinalizer(&m, mod.ModuleFinalizer) {
+		patch := client.MergeFrom(m.DeepCopy())
 		ctrlutil.AddFinalizer(&m, mod.ModuleFinalizer)
-		if err := r.Update(ctx, &m); err != nil {
+		if err := r.Patch(ctx, &m, patch); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
