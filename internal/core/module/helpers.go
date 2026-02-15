@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	addonsv1alpha1 "github.com/otterscale/otterscale-operator/api/addons/v1alpha1"
+	"github.com/otterscale/otterscale-operator/internal/core/labels"
 )
 
 const (
@@ -31,18 +32,6 @@ const (
 	// have been successfully reconciled and are healthy.
 	ConditionTypeReady = "Ready"
 
-	// LabelName identifies the application name (Kubernetes Recommended Label).
-	LabelName = "app.kubernetes.io/name"
-	// LabelManagedBy identifies the operator that manages the resource.
-	LabelManagedBy = "app.kubernetes.io/managed-by"
-	// LabelPartOf identifies the higher-level application this resource belongs to.
-	LabelPartOf = "app.kubernetes.io/part-of"
-	// LabelComponent identifies the component within the architecture.
-	LabelComponent = "app.kubernetes.io/component"
-	// LabelInstance identifies the instance (Module CR name).
-	LabelInstance = "app.kubernetes.io/instance"
-	// LabelVersion identifies the operator version.
-	LabelVersion = "app.kubernetes.io/version"
 	// LabelModuleTemplate identifies the ModuleTemplate that this resource was created from.
 	LabelModuleTemplate = "addons.otterscale.io/module-template"
 )
@@ -69,16 +58,11 @@ func (e *TemplateInvalidError) Error() string {
 }
 
 // LabelsForModule returns a standard set of labels for resources managed by a Module.
+// It builds on the shared labels.Standard() base and adds the Module-specific template label.
 func LabelsForModule(moduleName, templateName, version string) map[string]string {
-	return map[string]string{
-		LabelName:           "module",
-		LabelManagedBy:      "otterscale-operator",
-		LabelPartOf:         "otterscale",
-		LabelComponent:      "module",
-		LabelInstance:       moduleName,
-		LabelVersion:        version,
-		LabelModuleTemplate: templateName,
-	}
+	l := labels.Standard("", moduleName, "module", version)
+	l[LabelModuleTemplate] = templateName
+	return l
 }
 
 // TargetNamespace resolves the effective namespace for a Module,

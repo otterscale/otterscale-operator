@@ -21,6 +21,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/otterscale/otterscale-operator/internal/core/labels"
 )
 
 const (
@@ -40,14 +42,7 @@ const (
 
 // LabelsForWorkspace returns a standard set of labels for resources managed by this operator.
 func LabelsForWorkspace(workspace, version string) map[string]string {
-	return map[string]string{
-		"app.kubernetes.io/name":       "workspace",
-		"app.kubernetes.io/instance":   workspace,
-		"app.kubernetes.io/version":    version,
-		"app.kubernetes.io/component":  "workspace",
-		"app.kubernetes.io/part-of":    "otterscale",
-		"app.kubernetes.io/managed-by": "otterscale-operator",
-	}
+	return labels.Standard("", workspace, "workspace", version)
 }
 
 // IsOwned checks if the object is owned by the given UID to prevent adoption conflicts.

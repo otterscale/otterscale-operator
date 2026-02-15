@@ -76,8 +76,8 @@ var _ = BeforeSuite(func() {
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
-	crdPaths := []string{filepath.Join("..", "..", "..", "config", "crd", "bases")}
-	crdPaths = append(crdPaths, fluxCRDPaths()...)
+	crdPath := filepath.Join("..", "..", "..", "config", "crd", "bases")
+	crdPaths := append([]string{crdPath}, fluxCRDPaths()...)
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     crdPaths,
 		ErrorIfCRDPathMissing: true,

@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	"github.com/otterscale/otterscale-operator/internal/core/labels"
 	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
 )
 
@@ -301,13 +302,12 @@ var _ = Describe("Workspace Controller", func() {
 
 	Context("Domain Helpers", func() {
 		It("should generate correct labels", func() {
-			labels := ws.LabelsForWorkspace("workspace-name", "v1")
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/name", "workspace"))
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/instance", "workspace-name"))
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/version", "v1"))
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/component", "workspace"))
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/part-of", "otterscale"))
-			Expect(labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "otterscale-operator"))
+			wsLabels := ws.LabelsForWorkspace("workspace-name", "v1")
+			Expect(wsLabels).To(HaveKeyWithValue(labels.Instance, "workspace-name"))
+			Expect(wsLabels).To(HaveKeyWithValue(labels.Version, "v1"))
+			Expect(wsLabels).To(HaveKeyWithValue(labels.Component, "workspace"))
+			Expect(wsLabels).To(HaveKeyWithValue(labels.PartOf, "otterscale"))
+			Expect(wsLabels).To(HaveKeyWithValue(labels.ManagedBy, "otterscale-operator"))
 		})
 
 		It("should check ownership correctly", func() {

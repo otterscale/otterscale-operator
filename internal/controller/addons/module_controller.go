@@ -43,6 +43,7 @@ import (
 	"k8s.io/client-go/tools/events"
 
 	addonsv1alpha1 "github.com/otterscale/otterscale-operator/api/addons/v1alpha1"
+	"github.com/otterscale/otterscale-operator/internal/core/labels"
 	mod "github.com/otterscale/otterscale-operator/internal/core/module"
 )
 
@@ -174,9 +175,11 @@ func (r *ModuleReconciler) reconcileDelete(ctx context.Context, m *addonsv1alpha
 			}
 		}
 
-		// Remove finalizer
+		// Remove finalizer using Patch to avoid ResourceVersion conflicts
+		// under high concurrency (consistent with how we add the finalizer).
+		patch := client.MergeFrom(m.DeepCopy())
 		ctrlutil.RemoveFinalizer(m, mod.ModuleFinalizer)
-		if err := r.Update(ctx, m); err != nil {
+		if err := r.Patch(ctx, m, patch); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -422,17 +425,17 @@ func (r *ModuleReconciler) mapModuleTemplateToModules(ctx context.Context, obj c
 // mapFluxResourceToModule maps a FluxCD resource back to its owning Module
 // using the instance label set by the operator.
 func (r *ModuleReconciler) mapFluxResourceToModule(_ context.Context, obj client.Object) []reconcile.Request {
-	labels := obj.GetLabels()
-	if labels == nil {
+	objLabels := obj.GetLabels()
+	if objLabels == nil {
 		return nil
 	}
 
 	// Only handle resources managed by us
-	if labels[mod.LabelManagedBy] != "otterscale-operator" || labels[mod.LabelComponent] != "module" {
+	if objLabels[labels.ManagedBy] != "otterscale-operator" || objLabels[labels.Component] != "module" {
 		return nil
 	}
 
-	moduleName, ok := labels[mod.LabelInstance]
+	moduleName, ok := objLabels[labels.Instance]
 	if !ok {
 		return nil
 	}
