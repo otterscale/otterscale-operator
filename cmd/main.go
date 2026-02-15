@@ -190,7 +190,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Version:  version,
-		Recorder: mgr.GetEventRecorderFor("workspace-controller"),
+		Recorder: mgr.GetEventRecorder("workspace-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
 		os.Exit(1)

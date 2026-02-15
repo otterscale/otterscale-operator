@@ -40,7 +40,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
 	ws "github.com/otterscale/otterscale-operator/internal/core/workspace"
@@ -56,7 +56,7 @@ type WorkspaceReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Version  string
-	Recorder record.EventRecorder
+	Recorder events.EventRecorder
 
 	istioDetector *IstioDetector
 }
@@ -132,13 +132,13 @@ func (r *WorkspaceReconciler) handleReconcileError(ctx context.Context, w *tenan
 	if errors.As(err, &nce) {
 		// Permanent error: do not requeue, just update status
 		r.setReadyConditionFalse(ctx, w, "NamespaceConflict", err.Error())
-		r.Recorder.Event(w, corev1.EventTypeWarning, "NamespaceConflict", err.Error())
+		r.Recorder.Eventf(w, nil, corev1.EventTypeWarning, "NamespaceConflict", "Reconcile", err.Error())
 		return ctrl.Result{}, nil
 	}
 
 	// Transient error: update status and requeue
 	r.setReadyConditionFalse(ctx, w, "ReconcileError", err.Error())
-	r.Recorder.Event(w, corev1.EventTypeWarning, "ReconcileError", err.Error())
+	r.Recorder.Eventf(w, nil, corev1.EventTypeWarning, "ReconcileError", "Reconcile", err.Error())
 	return ctrl.Result{}, err
 }
 
@@ -352,7 +352,7 @@ func (r *WorkspaceReconciler) updateStatus(ctx context.Context, w *tenantv1alpha
 			return err
 		}
 		log.FromContext(ctx).Info("Workspace status updated")
-		r.Recorder.Eventf(w, corev1.EventTypeNormal, "Reconciled",
+		r.Recorder.Eventf(w, nil, corev1.EventTypeNormal, "Reconciled", "Reconcile",
 			"Workspace resources reconciled for namespace %s", w.Spec.Namespace)
 	}
 

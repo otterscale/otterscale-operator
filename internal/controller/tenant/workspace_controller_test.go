@@ -32,7 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -100,7 +100,7 @@ var _ = Describe("Workspace Controller", func() {
 		reconciler = &WorkspaceReconciler{
 			Client:        k8sClient,
 			Scheme:        k8sClient.Scheme(),
-			Recorder:      record.NewFakeRecorder(100),
+			Recorder:      events.NewFakeRecorder(100),
 			istioDetector: &IstioDetector{}, // defaults to disabled (no Istio in envtest)
 		}
 		workspace = makeWorkspace(resourceName, namespaceName)
