@@ -1,4 +1,4 @@
-# Otterscale Operator
+# OtterScale Operator
 
 [![Release](https://img.shields.io/github/v/release/otterscale/otterscale-operator?logo=github)](https://github.com/otterscale/otterscale-operator/releases)
 [![License](https://img.shields.io/github/license/otterscale/otterscale-operator?logo=github&color=blue)](https://opensource.org/license/apache-2-0)
