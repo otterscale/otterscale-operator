@@ -1,0 +1,48 @@
+apiVersion: apps.otterscale.io/v1alpha1
+kind: SimpleApp
+metadata:
+  labels:
+    app.kubernetes.io/name: otterscale-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: simpleapp-sample
+spec:
+  # Minimal deployment spec using the new `deployment` structure.
+  # The operator will mount a PVC at `/data` if `pvcSpec` is provided.
+  deploymentSpec:
+    replicas: 1
+    image: nginx:1.21
+    command: ["/bin/sh", "-c", "echo Hello, Otterscale! && sleep 3600000"]
+    ports:
+      - name: http
+        containerPort: 80
+        protocol: TCP
+    env:
+      - name: APP_ENV
+        value: production
+      - name: LOG_LEVEL
+        value: info
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+  # Service specification
+  serviceSpec:
+    type: ClusterIP
+    ports:
+      - name: http
+        port: 80
+        targetPort: 80
+        protocol: TCP
+
+  # PVC specification (operator mounts this PVC into the pod at /data)
+  pvcSpec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: ceph-ext4
