@@ -79,7 +79,7 @@ type SimpleAppStatus struct {
 	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
 
 	// deploymentRef references the managed Deployment resource
-	// +required
+	// +optional
 	DeploymentRef *corev1.ObjectReference `json:"deploymentRef,omitempty"`
 
 	// serviceRef references the managed Service resource
