@@ -173,19 +173,24 @@ func (r *SimpleAppReconciler) reconcileDeployment(ctx context.Context, app *apps
 		},
 	}
 
+	// Check if DeploymentSpec is provided
+	if app.Spec.DeploymentSpec == nil {
+		return fmt.Errorf("deploymentSpec is required")
+	}
+
 	// Validate selector matches template labels
-	if err := r.validateDeploymentSpec(&app.Spec.DeploymentSpec); err != nil {
+	if err := r.validateDeploymentSpec(app.Spec.DeploymentSpec); err != nil {
 		return err
 	}
 
 	// Validate security constraints to prevent privilege escalation
-	if err := r.validateSecurityConstraints(&app.Spec.DeploymentSpec); err != nil {
+	if err := r.validateSecurityConstraints(app.Spec.DeploymentSpec); err != nil {
 		return err
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
 		deployment.Labels = labelsForSimpleApp(app.Name, r.Version)
-		deployment.Spec = app.Spec.DeploymentSpec
+		deployment.Spec = *app.Spec.DeploymentSpec
 		return ctrlutil.SetControllerReference(app, deployment, r.Scheme)
 	})
 	if err != nil {

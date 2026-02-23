@@ -59,7 +59,7 @@ var _ = Describe("SimpleApp Controller", func() {
 				Namespace: ns,
 			},
 			Spec: appsv1alpha1.SimpleAppSpec{
-				DeploymentSpec: appsv1.DeploymentSpec{
+				DeploymentSpec: &appsv1.DeploymentSpec{
 					Replicas: &replicas,
 					Selector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{
