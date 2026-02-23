@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -26,9 +25,8 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 // SimpleAppSpec defines the desired state of SimpleApp
 type SimpleAppSpec struct {
-	// deploymentSpec defines the Deployment configuration
-	// +kubebuilder:validation:Required
-	DeploymentSpec *appsv1.DeploymentSpec `json:"deploymentSpec"`
+	// deployment defines the deployment configuration
+	DeploymentSpec SimpleAppDeploymentSpec `json:"deploymentSpec"`
 
 	// serviceSpec defines the Service configuration
 	// If specified, a Service will be created
@@ -39,6 +37,37 @@ type SimpleAppSpec struct {
 	// If specified, a PVC will be created
 	// +optional
 	PVCSpec *corev1.PersistentVolumeClaimSpec `json:"pvcSpec,omitempty"`
+}
+
+// SimpleAppDeploymentSpec defines the minimal deployment spec for SimpleApp
+type SimpleAppDeploymentSpec struct {
+	// Replicas is the number of desired pods.
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Image is the container image to use.
+	// +required
+	Image string `json:"image"`
+
+	// Command to run in the container.
+	// +optional
+	Command []string `json:"command,omitempty"`
+
+	// Args to pass to the command.
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Env environment variables to set in the container.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Resources requirements for the container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Ports to expose from the container.
+	// +optional
+	Ports []corev1.ContainerPort `json:"ports,omitempty"`
 }
 
 // SimpleAppStatus defines the observed state of SimpleApp.
@@ -80,6 +109,7 @@ type SimpleAppStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.spec.deploymentSpec.replicas`,priority=1
+// +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.deploymentSpec.image`
 // +kubebuilder:printcolumn:name="Service Type",type=string,JSONPath=`.spec.serviceSpec.type`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

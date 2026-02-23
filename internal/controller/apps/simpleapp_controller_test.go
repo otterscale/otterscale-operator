@@ -59,28 +59,9 @@ var _ = Describe("SimpleApp Controller", func() {
 				Namespace: ns,
 			},
 			Spec: appsv1alpha1.SimpleAppSpec{
-				DeploymentSpec: &appsv1.DeploymentSpec{
+				DeploymentSpec: appsv1alpha1.SimpleAppDeploymentSpec{
 					Replicas: &replicas,
-					Selector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"app": name,
-						},
-					},
-					Template: corev1.PodTemplateSpec{
-						ObjectMeta: metav1.ObjectMeta{
-							Labels: map[string]string{
-								"app": name,
-							},
-						},
-						Spec: corev1.PodSpec{
-							Containers: []corev1.Container{
-								{
-									Name:  "nginx",
-									Image: "nginx:latest",
-								},
-							},
-						},
-					},
+					Image:    "nginx:latest",
 				},
 			},
 		}
@@ -150,7 +131,7 @@ var _ = Describe("SimpleApp Controller", func() {
 			var deployment appsv1.Deployment
 			fetchResource(&deployment, resourceName+"-deployment", namespace)
 			Expect(deployment.Spec.Replicas).To(Equal(int32Ptr(1)))
-			Expect(deployment.Spec.Selector.MatchLabels).To(HaveKeyWithValue("app", resourceName))
+			Expect(deployment.Spec.Selector.MatchLabels).To(HaveKeyWithValue("app.kubernetes.io/instance", resourceName))
 
 			By("Verifying status updates")
 			fetchResource(simpleApp, resourceName, namespace)

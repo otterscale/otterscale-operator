@@ -18,7 +18,6 @@ package apps
 
 import (
 	"context"
-	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -40,6 +39,7 @@ const (
 	simpleAppDeploymentSuffix = "-deployment"
 	simpleAppServiceSuffix    = "-service"
 	simpleAppPVCSuffix        = "-pvc"
+	simpleAppContainerSuffix  = "-container"
 
 	// Finalizer name
 	simpleAppFinalizerName = "apps.otterscale.io/simpleapp-finalizer"
@@ -173,24 +173,63 @@ func (r *SimpleAppReconciler) reconcileDeployment(ctx context.Context, app *apps
 		},
 	}
 
-	// Check if DeploymentSpec is provided
-	if app.Spec.DeploymentSpec == nil {
-		return fmt.Errorf("deploymentSpec is required")
+	labels := labelsForSimpleApp(app.Name, r.Version)
+	replicas := app.Spec.DeploymentSpec.Replicas
+	if replicas == nil {
+		one := int32(1)
+		replicas = &one
 	}
 
-	// Validate selector matches template labels
-	if err := r.validateDeploymentSpec(app.Spec.DeploymentSpec); err != nil {
-		return err
+	deploymentSpec := appsv1.DeploymentSpec{
+		Replicas: replicas,
+		Selector: &metav1.LabelSelector{
+			MatchLabels: labels,
+		},
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: labels,
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:      app.Name + simpleAppContainerSuffix,
+						Image:     app.Spec.DeploymentSpec.Image,
+						Command:   app.Spec.DeploymentSpec.Command,
+						Args:      app.Spec.DeploymentSpec.Args,
+						Env:       app.Spec.DeploymentSpec.Env,
+						Resources: app.Spec.DeploymentSpec.Resources,
+						Ports:     app.Spec.DeploymentSpec.Ports,
+					},
+				},
+			},
+		},
 	}
 
-	// Validate security constraints to prevent privilege escalation
-	if err := r.validateSecurityConstraints(app.Spec.DeploymentSpec); err != nil {
-		return err
+	// Add PVC volume if specified
+	if app.Spec.PVCSpec != nil {
+		volumeName := "data-volume"
+		// Append volume to the pod spec
+		deploymentSpec.Template.Spec.Volumes = append(deploymentSpec.Template.Spec.Volumes, corev1.Volume{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: app.Name + simpleAppPVCSuffix,
+				},
+			},
+		})
+
+		// Append volume mount to the container
+		container := deploymentSpec.Template.Spec.Containers[0]
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      volumeName,
+			MountPath: "/data",
+		})
+		deploymentSpec.Template.Spec.Containers[0] = container
 	}
 
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, deployment, func() error {
-		deployment.Labels = labelsForSimpleApp(app.Name, r.Version)
-		deployment.Spec = *app.Spec.DeploymentSpec
+		deployment.Labels = labels
+		deployment.Spec = deploymentSpec
 		return ctrlutil.SetControllerReference(app, deployment, r.Scheme)
 	})
 	if err != nil {
@@ -218,6 +257,8 @@ func (r *SimpleAppReconciler) reconcileService(ctx context.Context, app *appsv1a
 	op, err := ctrlutil.CreateOrUpdate(ctx, r.Client, service, func() error {
 		service.Labels = labelsForSimpleApp(app.Name, r.Version)
 		service.Spec = *app.Spec.ServiceSpec
+		// Override selector to match deployment labels
+		service.Spec.Selector = labelsForSimpleApp(app.Name, r.Version)
 		return ctrlutil.SetControllerReference(app, service, r.Scheme)
 	})
 	if err != nil {
@@ -282,112 +323,6 @@ func (r *SimpleAppReconciler) updateStatus(ctx context.Context, app *appsv1alpha
 			return err
 		}
 		log.FromContext(ctx).Info("SimpleApp status updated")
-	}
-
-	return nil
-}
-
-// validateDeploymentSpec validates that the selector matches the pod template labels.
-func (r *SimpleAppReconciler) validateDeploymentSpec(deploymentSpec *appsv1.DeploymentSpec) error {
-	// DeploymentSpec should never be nil at this point due to CRD validation
-	// Check if selector is defined
-	if deploymentSpec.Selector == nil || len(deploymentSpec.Selector.MatchLabels) == 0 {
-		return fmt.Errorf("deployment selector must be specified")
-	}
-
-	// Check if template labels are defined
-	templateLabels := deploymentSpec.Template.Labels
-	if len(templateLabels) == 0 {
-		return fmt.Errorf("deployment template labels must be specified")
-	}
-
-	// Verify all selector labels exist in template labels with matching values
-	for key, value := range deploymentSpec.Selector.MatchLabels {
-		if templateValue, exists := templateLabels[key]; !exists {
-			return fmt.Errorf("selector label %q not found in pod template labels", key)
-		} else if templateValue != value {
-			return fmt.Errorf("selector label %q=%q does not match pod template label value %q", key, value, templateValue)
-		}
-	}
-
-	return nil
-}
-
-// validateSecurityConstraints ensures that the deployment spec does not contain
-// privileged or dangerous configurations that could lead to privilege escalation.
-func (r *SimpleAppReconciler) validateSecurityConstraints(deploymentSpec *appsv1.DeploymentSpec) error {
-	// DeploymentSpec should never be nil at this point due to CRD validation
-	podSpec := &deploymentSpec.Template.Spec
-
-	// Check pod-level host access
-	if podSpec.HostNetwork {
-		return fmt.Errorf("hostNetwork is not allowed")
-	}
-	if podSpec.HostPID {
-		return fmt.Errorf("hostPID is not allowed")
-	}
-	if podSpec.HostIPC {
-		return fmt.Errorf("hostIPC is not allowed")
-	}
-
-	// Check for dangerous volume types
-	for _, vol := range podSpec.Volumes {
-		if vol.HostPath != nil {
-			return fmt.Errorf("hostPath volumes are not allowed")
-		}
-		// Allow emptyDir, configMap, secret, persistentVolumeClaim, projected, downwardAPI
-		// Block other types that could be dangerous
-	}
-
-	// Check container security contexts
-	for _, container := range podSpec.Containers {
-		if err := r.validateContainerSecurity(&container); err != nil {
-			return fmt.Errorf("container %q: %w", container.Name, err)
-		}
-	}
-
-	// Check init containers
-	for _, container := range podSpec.InitContainers {
-		if err := r.validateContainerSecurity(&container); err != nil {
-			return fmt.Errorf("init container %q: %w", container.Name, err)
-		}
-	}
-
-	return nil
-}
-
-// validateContainerSecurity checks for privileged container configurations.
-func (r *SimpleAppReconciler) validateContainerSecurity(container *corev1.Container) error {
-	if container.SecurityContext == nil {
-		return nil
-	}
-
-	sc := container.SecurityContext
-
-	// Block privileged containers
-	if sc.Privileged != nil && *sc.Privileged {
-		return fmt.Errorf("privileged containers are not allowed")
-	}
-
-	// Block privilege escalation
-	if sc.AllowPrivilegeEscalation != nil && *sc.AllowPrivilegeEscalation {
-		return fmt.Errorf("allowPrivilegeEscalation must be false")
-	}
-
-	// Block dangerous capabilities
-	if sc.Capabilities != nil {
-		dangerousCaps := []string{
-			"SYS_ADMIN", "SYS_MODULE", "SYS_RAWIO", "SYS_PTRACE",
-			"SYS_BOOT", "MAC_ADMIN", "MAC_OVERRIDE", "NET_ADMIN",
-		}
-		for _, cap := range sc.Capabilities.Add {
-			capStr := string(cap)
-			for _, dangerous := range dangerousCaps {
-				if capStr == dangerous {
-					return fmt.Errorf("capability %q is not allowed", capStr)
-				}
-			}
-		}
 	}
 
 	return nil
