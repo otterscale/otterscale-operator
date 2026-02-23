@@ -407,7 +407,7 @@ func (r *SimpleAppReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // labelsForSimpleApp returns a standard set of labels for resources managed by this operator.
 func labelsForSimpleApp(appName, version string) map[string]string {
 	return map[string]string{
-		"app.otterscale.io/name":       "simpleapp",
+		"app.kubernetes.io/name":       "simpleapp",
 		"app.kubernetes.io/instance":   appName,
 		"app.kubernetes.io/version":    version,
 		"app.kubernetes.io/component":  "application",

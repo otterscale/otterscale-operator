@@ -204,8 +204,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&appscontroller.SimpleAppReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Version: version,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SimpleApp")
 		os.Exit(1)
