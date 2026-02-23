@@ -1,0 +1,50 @@
+apiVersion: addons.otterscale.io/v1alpha1
+kind: ModuleTemplate
+metadata:
+  name: ingress-nginx
+spec:
+  description: "NGINX Ingress Controller for Kubernetes"
+  namespace: ingress-nginx
+  helmRelease:
+    spec:
+      interval: 10m
+      chart:
+        spec:
+          chart: ingress-nginx
+          version: "4.x"
+          sourceRef:
+            kind: HelmRepository
+            name: ingress-nginx
+            namespace: flux-system
+          reconcileStrategy: ChartVersion
+      values:
+        controller:
+          replicaCount: 2
+          service:
+            type: LoadBalancer
+---
+apiVersion: addons.otterscale.io/v1alpha1
+kind: ModuleTemplate
+metadata:
+  name: cert-manager
+spec:
+  description: "Automatically provision and manage TLS certificates in Kubernetes"
+  namespace: cert-manager
+  helmRelease:
+    spec:
+      interval: 10m
+      chart:
+        spec:
+          chart: cert-manager
+          version: "v1.x"
+          sourceRef:
+            kind: HelmRepository
+            name: jetstack
+            namespace: flux-system
+          reconcileStrategy: ChartVersion
+      install:
+        crds: CreateReplace
+      upgrade:
+        crds: CreateReplace
+      values:
+        installCRDs: true

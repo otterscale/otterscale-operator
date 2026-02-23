@@ -25,6 +25,9 @@ resources:
 - apps_simpleapp_admin_role.yaml
 - apps_simpleapp_editor_role.yaml
 - apps_simpleapp_viewer_role.yaml
+- addons_moduletemplate_admin_role.yaml
+- addons_moduletemplate_editor_role.yaml
+- addons_moduletemplate_viewer_role.yaml
 - addons_module_admin_role.yaml
 - addons_module_editor_role.yaml
 - addons_module_viewer_role.yaml
@@ -32,5 +35,3 @@ resources:
 - tenant_workspace_editor_role.yaml
 - tenant_workspace_viewer_role.yaml
 - tenant_workspace_binding.yaml
-
-

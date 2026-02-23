@@ -18,127 +18,452 @@ package addons
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	addonsv1alpha1 "github.com/otterscale/otterscale-operator/api/addons/v1alpha1"
+	"github.com/otterscale/otterscale-operator/internal/core/labels"
+	mod "github.com/otterscale/otterscale-operator/internal/core/module"
 )
 
 var _ = Describe("Module Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+	const (
+		timeout  = time.Second * 10
+		interval = time.Millisecond * 250
+		version  = "test-v1"
+	)
 
-		ctx := context.Background()
+	var (
+		ctx            context.Context
+		reconciler     *ModuleReconciler
+		module         *addonsv1alpha1.Module
+		moduleTemplate *addonsv1alpha1.ModuleTemplate
+		moduleName     string
+		templateName   string
+		targetNS       string
+	)
 
-		typeNamespacedName := types.NamespacedName{
-			Name: resourceName, // Module is cluster-scoped
+	// --- Helpers ---
+
+	makeHelmReleaseTemplate := func(name, namespace string) *addonsv1alpha1.ModuleTemplate {
+		return &addonsv1alpha1.ModuleTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: addonsv1alpha1.ModuleTemplateSpec{
+				Description: "Test HelmRelease module template",
+				Namespace:   namespace,
+				HelmRelease: &addonsv1alpha1.HelmReleaseTemplateSpec{
+					Spec: helmv2.HelmReleaseSpec{
+						Interval: metav1.Duration{Duration: 10 * time.Minute},
+						Chart: &helmv2.HelmChartTemplate{
+							Spec: helmv2.HelmChartTemplateSpec{
+								Chart: "test-chart",
+								SourceRef: helmv2.CrossNamespaceObjectReference{
+									Kind: "HelmRepository",
+									Name: "test-repo",
+								},
+							},
+						},
+					},
+				},
+			},
 		}
-		module := &addonsv1alpha1.Module{}
+	}
+
+	makeKustomizationTemplate := func(name, namespace string) *addonsv1alpha1.ModuleTemplate {
+		return &addonsv1alpha1.ModuleTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: addonsv1alpha1.ModuleTemplateSpec{
+				Description: "Test Kustomization module template",
+				Namespace:   namespace,
+				Kustomization: &addonsv1alpha1.KustomizationTemplateSpec{
+					Spec: kustomizev1.KustomizationSpec{
+						Interval: metav1.Duration{Duration: 10 * time.Minute},
+						Prune:    true,
+						SourceRef: kustomizev1.CrossNamespaceSourceReference{
+							Kind: "GitRepository",
+							Name: "test-repo",
+						},
+						Path: "./deploy",
+					},
+				},
+			},
+		}
+	}
+
+	makeModule := func(name, templateRef string, mods ...func(*addonsv1alpha1.Module)) *addonsv1alpha1.Module {
+		m := &addonsv1alpha1.Module{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: addonsv1alpha1.ModuleSpec{
+				TemplateRef: templateRef,
+			},
+		}
+		for _, fn := range mods {
+			fn(m)
+		}
+		return m
+	}
+
+	executeReconcile := func() {
+		nsName := types.NamespacedName{Name: moduleName}
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	fetchResource := func(obj client.Object, name, namespace string) {
+		key := types.NamespacedName{Name: name, Namespace: namespace}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, key, obj)
+		}, timeout, interval).Should(Succeed())
+	}
+
+	// --- Lifecycle ---
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		moduleName = "mod-" + string(uuid.NewUUID())[:8]
+		templateName = "tmpl-" + string(uuid.NewUUID())[:8]
+		targetNS = "ns-" + string(uuid.NewUUID())[:8]
+		module = nil
+		moduleTemplate = nil
+		reconciler = &ModuleReconciler{
+			Client:   k8sClient,
+			Scheme:   k8sClient.Scheme(),
+			Version:  version,
+			Recorder: events.NewFakeRecorder(100),
+		}
+
+		// Pre-create the target namespace (FluxCD resources are namespace-scoped)
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: targetNS},
+		})).To(Succeed())
+	})
+
+	JustBeforeEach(func() {
+		if moduleTemplate != nil {
+			Expect(k8sClient.Create(ctx, moduleTemplate)).To(Succeed())
+		}
+		if module != nil {
+			Expect(k8sClient.Create(ctx, module)).To(Succeed())
+		}
+	})
+
+	AfterEach(func() {
+		// Clean up Module (remove finalizer first if present)
+		var m addonsv1alpha1.Module
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: moduleName}, &m); err == nil {
+			if ctrlutil.ContainsFinalizer(&m, mod.ModuleFinalizer) {
+				patch := client.MergeFrom(m.DeepCopy())
+				ctrlutil.RemoveFinalizer(&m, mod.ModuleFinalizer)
+				_ = k8sClient.Patch(ctx, &m, patch)
+			}
+			_ = k8sClient.Delete(ctx, &m)
+		}
+
+		// Clean up ModuleTemplate
+		if moduleTemplate != nil {
+			_ = k8sClient.Delete(ctx, moduleTemplate)
+		}
+
+		// Clean up HelmRelease if exists
+		var hr helmv2.HelmRelease
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: moduleName, Namespace: targetNS}, &hr); err == nil {
+			_ = k8sClient.Delete(ctx, &hr)
+		}
+
+		// Clean up Kustomization if exists
+		var ks kustomizev1.Kustomization
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: moduleName, Namespace: targetNS}, &ks); err == nil {
+			_ = k8sClient.Delete(ctx, &ks)
+		}
+	})
+
+	// --- Tests ---
+
+	Context("HelmRelease Reconciliation", func() {
+		BeforeEach(func() {
+			moduleTemplate = makeHelmReleaseTemplate(templateName, targetNS)
+			module = makeModule(moduleName, templateName)
+		})
+
+		It("should create a HelmRelease and update Module status", func() {
+			executeReconcile()
+
+			By("Verifying the HelmRelease is created")
+			var hr helmv2.HelmRelease
+			fetchResource(&hr, moduleName, targetNS)
+			Expect(hr.Spec.Chart.Spec.Chart).To(Equal("test-chart"))
+
+			By("Verifying labels on the HelmRelease")
+			Expect(hr.Labels).To(HaveKeyWithValue(labels.ManagedBy, "otterscale-operator"))
+			Expect(hr.Labels).To(HaveKeyWithValue(labels.Component, "module"))
+			Expect(hr.Labels).To(HaveKeyWithValue(labels.Instance, moduleName))
+			Expect(hr.Labels).To(HaveKeyWithValue(labels.Version, version))
+			Expect(hr.Labels).To(HaveKeyWithValue(mod.LabelModuleTemplate, templateName))
+
+			By("Verifying OwnerReference is set")
+			Expect(hr.OwnerReferences).To(HaveLen(1))
+			Expect(hr.OwnerReferences[0].Name).To(Equal(moduleName))
+
+			By("Verifying Module status")
+			fetchResource(module, moduleName, "")
+			Expect(module.Status.ObservedGeneration).To(Equal(module.Generation))
+			Expect(module.Status.TemplateGeneration).To(Equal(moduleTemplate.Generation))
+			Expect(module.Status.HelmReleaseRef).NotTo(BeNil())
+			Expect(module.Status.HelmReleaseRef.Name).To(Equal(moduleName))
+			Expect(module.Status.HelmReleaseRef.Namespace).To(Equal(targetNS))
+			Expect(module.Status.KustomizationRef).To(BeNil())
+
+			By("Verifying Ready condition reflects HelmRelease pending state")
+			readyCond := meta.FindStatusCondition(module.Status.Conditions, mod.ConditionTypeReady)
+			Expect(readyCond).NotTo(BeNil())
+			// HelmRelease just created, no Ready condition yet → Unknown/Pending
+			Expect(readyCond.Reason).To(Equal("HelmReleasePending"))
+		})
+
+		It("should add finalizer to the Module", func() {
+			executeReconcile()
+
+			fetchResource(module, moduleName, "")
+			Expect(ctrlutil.ContainsFinalizer(module, mod.ModuleFinalizer)).To(BeTrue())
+		})
+
+		It("should be idempotent on repeated reconciliation", func() {
+			executeReconcile()
+			executeReconcile()
+
+			var hr helmv2.HelmRelease
+			fetchResource(&hr, moduleName, targetNS)
+			Expect(hr.Spec.Chart.Spec.Chart).To(Equal("test-chart"))
+		})
+	})
+
+	Context("Kustomization Reconciliation", func() {
+		BeforeEach(func() {
+			moduleTemplate = makeKustomizationTemplate(templateName, targetNS)
+			module = makeModule(moduleName, templateName)
+		})
+
+		It("should create a Kustomization and update Module status", func() {
+			executeReconcile()
+
+			By("Verifying the Kustomization is created")
+			var ks kustomizev1.Kustomization
+			fetchResource(&ks, moduleName, targetNS)
+			Expect(ks.Spec.Path).To(Equal("./deploy"))
+			Expect(ks.Spec.Prune).To(BeTrue())
+			Expect(ks.Spec.SourceRef.Name).To(Equal("test-repo"))
+
+			By("Verifying labels on the Kustomization")
+			Expect(ks.Labels).To(HaveKeyWithValue(labels.ManagedBy, "otterscale-operator"))
+			Expect(ks.Labels).To(HaveKeyWithValue(labels.Instance, moduleName))
+
+			By("Verifying Module status")
+			fetchResource(module, moduleName, "")
+			Expect(module.Status.KustomizationRef).NotTo(BeNil())
+			Expect(module.Status.KustomizationRef.Name).To(Equal(moduleName))
+			Expect(module.Status.KustomizationRef.Namespace).To(Equal(targetNS))
+			Expect(module.Status.HelmReleaseRef).To(BeNil())
+		})
+	})
+
+	Context("Template Not Found", func() {
+		BeforeEach(func() {
+			moduleTemplate = nil // Do NOT create a template
+			module = makeModule(moduleName, "non-existent-template")
+		})
+
+		It("should set Ready=False with TemplateNotFound and not return error", func() {
+			By("Reconciling - TemplateNotFound is permanent: should NOT return error (no requeue)")
+			nsName := types.NamespacedName{Name: moduleName}
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying the status condition")
+			fetchResource(module, moduleName, "")
+			readyCond := meta.FindStatusCondition(module.Status.Conditions, mod.ConditionTypeReady)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal("TemplateNotFound"))
+		})
+	})
+
+	Context("Namespace Override", func() {
+		var overrideNS string
 
 		BeforeEach(func() {
-			By("creating the templates ConfigMap")
-			if err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: defaultTemplatesConfigMapNamespace}}); err != nil && !errors.IsAlreadyExists(err) {
-				Expect(err).NotTo(HaveOccurred())
-			}
-			if err := k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "flux-system"}}); err != nil && !errors.IsAlreadyExists(err) {
-				Expect(err).NotTo(HaveOccurred())
-			}
-			cm := &corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      defaultTemplatesConfigMapName,
-					Namespace: defaultTemplatesConfigMapNamespace,
-				},
-				Data: map[string]string{
-					templatesConfigMapDataKey: `- id: test-resource
-  manifest: |
-    apiVersion: kustomize.toolkit.fluxcd.io/v1
-    kind: Kustomization
-    metadata:
-      name: test-resource
-      namespace: flux-system
-    spec:
-      interval: 1m
-      path: ./dummy
-      prune: true
-      sourceRef:
-        kind: GitRepository
-        name: flux-system
-`,
-				},
-			}
-			if err := k8sClient.Create(ctx, cm); err != nil {
-				if errors.IsAlreadyExists(err) {
-					Expect(k8sClient.Update(ctx, cm)).To(Succeed())
-				} else {
-					Expect(err).NotTo(HaveOccurred())
-				}
-			}
+			overrideNS = "override-" + string(uuid.NewUUID())[:8]
 
-			By("creating the custom resource for the Kind Module")
-			err := k8sClient.Get(ctx, typeNamespacedName, module)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &addonsv1alpha1.Module{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: resourceName,
-					},
-					Spec: addonsv1alpha1.ModuleSpec{
-						Enabled: true,
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
+			// Create the override namespace
+			Expect(k8sClient.Create(ctx, &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: overrideNS},
+			})).To(Succeed())
 
-		AfterEach(func() {
-			resource := &addonsv1alpha1.Module{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(client.IgnoreNotFound(err)).To(Succeed())
-
-			By("Cleanup the specific resource instance Module")
-			_ = k8sClient.Delete(ctx, resource)
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &ModuleReconciler{
-				Client:                      k8sClient,
-				Scheme:                      k8sClient.Scheme(),
-				TemplatesConfigMapName:      defaultTemplatesConfigMapName,
-				TemplatesConfigMapNamespace: defaultTemplatesConfigMapNamespace,
-				DefaultFluxNamespace:        "flux-system",
-			}
-
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
+			moduleTemplate = makeHelmReleaseTemplate(templateName, targetNS)
+			module = makeModule(moduleName, templateName, func(m *addonsv1alpha1.Module) {
+				m.Spec.Namespace = &overrideNS
 			})
+		})
+
+		It("should create the HelmRelease in the overridden namespace", func() {
+			executeReconcile()
+
+			By("Verifying HelmRelease is in the override namespace, not the template default")
+			var hr helmv2.HelmRelease
+			fetchResource(&hr, moduleName, overrideNS)
+			Expect(hr.Namespace).To(Equal(overrideNS))
+
+			By("Verifying status ref points to the override namespace")
+			fetchResource(module, moduleName, "")
+			Expect(module.Status.HelmReleaseRef).NotTo(BeNil())
+			Expect(module.Status.HelmReleaseRef.Namespace).To(Equal(overrideNS))
+
+			By("Verifying no HelmRelease in the template's default namespace")
+			var hrDefault helmv2.HelmRelease
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: moduleName, Namespace: targetNS}, &hrDefault)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
+	Context("Values Override", func() {
+		BeforeEach(func() {
+			moduleTemplate = makeHelmReleaseTemplate(templateName, targetNS)
+			overrideValues := map[string]interface{}{
+				"replicaCount": 5,
+				"image":        map[string]interface{}{"tag": "custom"},
+			}
+			valuesJSON, err := json.Marshal(overrideValues)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("expecting the Flux Kustomization to exist")
-			ks := &unstructured.Unstructured{}
-			ks.SetAPIVersion("kustomize.toolkit.fluxcd.io/v1")
-			ks.SetKind("Kustomization")
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName, Namespace: "flux-system"}, ks)).To(Succeed())
+			module = makeModule(moduleName, templateName, func(m *addonsv1alpha1.Module) {
+				m.Spec.Values = &apiextensionsv1.JSON{Raw: valuesJSON}
+			})
+		})
 
-			By("disabling the module and expecting the Flux resource to be deleted")
-			Expect(k8sClient.Get(ctx, typeNamespacedName, module)).To(Succeed())
-			module.Spec.Enabled = false
-			Expect(k8sClient.Update(ctx, module)).To(Succeed())
+		It("should apply values override to the HelmRelease", func() {
+			executeReconcile()
 
-			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).NotTo(HaveOccurred())
+			var hr helmv2.HelmRelease
+			fetchResource(&hr, moduleName, targetNS)
 
+			By("Verifying values are overridden")
+			Expect(hr.Spec.Values).NotTo(BeNil())
+
+			var actual map[string]interface{}
+			Expect(json.Unmarshal(hr.Spec.Values.Raw, &actual)).To(Succeed())
+			Expect(actual["replicaCount"]).To(BeEquivalentTo(5))
+			Expect(actual["image"]).To(HaveKeyWithValue("tag", "custom"))
+		})
+	})
+
+	Context("Deletion Cleanup", func() {
+		BeforeEach(func() {
+			moduleTemplate = makeHelmReleaseTemplate(templateName, targetNS)
+			module = makeModule(moduleName, templateName)
+		})
+
+		It("should delete the HelmRelease when the Module is deleted", func() {
+			By("First reconcile to create resources")
+			executeReconcile()
+
+			var hr helmv2.HelmRelease
+			fetchResource(&hr, moduleName, targetNS)
+
+			By("Deleting the Module")
+			fetchResource(module, moduleName, "")
+			Expect(k8sClient.Delete(ctx, module)).To(Succeed())
+
+			By("Reconciling deletion")
+			nsName := types.NamespacedName{Name: moduleName}
+			// Refetch after delete to get DeletionTimestamp
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, types.NamespacedName{Name: resourceName, Namespace: "flux-system"}, ks)
-				return errors.IsNotFound(err)
-			}).Should(BeTrue())
+				var m addonsv1alpha1.Module
+				if err := k8sClient.Get(ctx, nsName, &m); err != nil {
+					return false
+				}
+				return !m.DeletionTimestamp.IsZero()
+			}, timeout, interval).Should(BeTrue())
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying the HelmRelease is deleted")
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: moduleName, Namespace: targetNS}, &hr))
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the Module finalizer is removed and Module is gone")
+			Eventually(func() bool {
+				return errors.IsNotFound(k8sClient.Get(ctx, nsName, &addonsv1alpha1.Module{}))
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("Template Generation Tracking", func() {
+		BeforeEach(func() {
+			moduleTemplate = makeHelmReleaseTemplate(templateName, targetNS)
+			module = makeModule(moduleName, templateName)
+		})
+
+		It("should track the template generation in Module status", func() {
+			executeReconcile()
+
+			fetchResource(module, moduleName, "")
+			initialTemplateGen := module.Status.TemplateGeneration
+
+			By("Updating the ModuleTemplate")
+			fetchResource(moduleTemplate, templateName, "")
+			moduleTemplate.Spec.Description = "Updated description"
+			Expect(k8sClient.Update(ctx, moduleTemplate)).To(Succeed())
+
+			By("Re-reconciling")
+			executeReconcile()
+
+			By("Verifying template generation is updated")
+			fetchResource(module, moduleName, "")
+			Expect(module.Status.TemplateGeneration).To(BeNumerically(">", initialTemplateGen))
+		})
+	})
+
+	Context("Domain Helpers", func() {
+		It("should generate correct labels", func() {
+			moduleLabels := mod.LabelsForModule("my-module", "my-template", "v1.0.0")
+			Expect(moduleLabels).To(HaveKeyWithValue(labels.ManagedBy, "otterscale-operator"))
+			Expect(moduleLabels).To(HaveKeyWithValue(labels.PartOf, "otterscale"))
+			Expect(moduleLabels).To(HaveKeyWithValue(labels.Component, "module"))
+			Expect(moduleLabels).To(HaveKeyWithValue(labels.Instance, "my-module"))
+			Expect(moduleLabels).To(HaveKeyWithValue(labels.Version, "v1.0.0"))
+			Expect(moduleLabels).To(HaveKeyWithValue(mod.LabelModuleTemplate, "my-template"))
+		})
+
+		It("should resolve target namespace correctly", func() {
+			mt := &addonsv1alpha1.ModuleTemplate{
+				Spec: addonsv1alpha1.ModuleTemplateSpec{Namespace: "template-ns"},
+			}
+
+			By("Using template default when Module has no override")
+			m := &addonsv1alpha1.Module{}
+			Expect(mod.TargetNamespace(m, mt)).To(Equal("template-ns"))
+
+			By("Using Module override when specified")
+			overrideNS := "module-ns"
+			m.Spec.Namespace = &overrideNS
+			Expect(mod.TargetNamespace(m, mt)).To(Equal("module-ns"))
 		})
 	})
 })

@@ -1,12 +1,15 @@
 apiVersion: addons.otterscale.io/v1alpha1
 kind: Module
 metadata:
-  labels:
-    app.kubernetes.io/name: otterscale-operator
-    app.kubernetes.io/managed-by: kustomize
-  name: module-sample
+  name: ingress-nginx
 spec:
-  # enabled toggles creation of the underlying Flux resource(s).
-  enabled: false
-  # templateRef defaults to metadata.name if omitted.
-  # templateRef: module-sample
+  templateRef: ingress-nginx
+---
+apiVersion: addons.otterscale.io/v1alpha1
+kind: Module
+metadata:
+  name: cert-manager
+spec:
+  templateRef: cert-manager
+  # Optional: override the default namespace from the template
+  # namespace: cert-manager-custom

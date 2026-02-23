@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.20.1
   name: modules.addons.otterscale.io
 spec:
   group: addons.otterscale.io
@@ -15,11 +15,11 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.enabled
-      name: Enabled
-      type: boolean
     - jsonPath: .spec.templateRef
       name: Template
+      type: string
+    - jsonPath: .spec.namespace
+      name: Namespace
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -30,7 +30,11 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Module is the Schema for the modules API
+        description: |-
+          Module is the Schema for the modules API.
+          A Module represents an installed platform addon instantiated from a ModuleTemplate.
+          The controller creates the corresponding FluxCD HelmRelease or Kustomization
+          and reflects its status back to the Module.
         properties:
           apiVersion:
             description: |-
@@ -50,89 +54,41 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of Module
+            description: Spec defines the desired behavior of the Module.
             properties:
-              enabled:
+              namespace:
                 description: |-
-                  Enabled toggles this module on/off.
-
-                  - When enabled is true, the operator will ensure the corresponding Flux resource
-                    (Kustomization or HelmRelease) exists.
-                  - When enabled is false, the operator will delete the previously created Flux resource(s).
-                type: boolean
-              templateRef:
-                description: |-
-                  TemplateRef selects which template entry to use from the templates ConfigMap.
-                  If omitted, the operator will use this Module's name (metadata.name) as the template ID.
+                  Namespace overrides the default target namespace defined in the ModuleTemplate.
+                  If not specified, the namespace from the ModuleTemplate is used.
                 maxLength: 63
                 minLength: 1
                 pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)$
                 type: string
+              templateRef:
+                description: |-
+                  TemplateRef is the name of the ModuleTemplate to instantiate.
+                  This field is immutable after creation.
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: templateRef is immutable
+                  rule: self == oldSelf
+              values:
+                description: |-
+                  Values overrides the default values for HelmRelease-based modules.
+                  Only applicable when the referenced ModuleTemplate uses a HelmRelease template.
+                  Ignored for Kustomization-based modules.
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - templateRef
             type: object
           status:
-            description: status defines the observed state of Module
+            description: Status represents the current information about the Module.
             properties:
-              appliedResources:
-                description: |-
-                  AppliedResources contains references to Flux resources created/managed for this Module.
-                  It is used for cleanup when the module is disabled.
-                items:
-                  description: ObjectReference contains enough information to let
-                    you inspect or modify the referred object.
-                  properties:
-                    apiVersion:
-                      description: API version of the referent.
-                      type: string
-                    fieldPath:
-                      description: |-
-                        If referring to a piece of an object instead of an entire object, this string
-                        should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
-                        For example, if the object reference is to a container within a pod, this would take on a value like:
-                        "spec.containers{name}" (where "name" refers to the name of the container that triggered
-                        the event) or if no container name is specified "spec.containers[2]" (container with
-                        index 2 in this pod). This syntax is chosen only to have some well-defined way of
-                        referencing a part of an object.
-                      type: string
-                    kind:
-                      description: |-
-                        Kind of the referent.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-                      type: string
-                    name:
-                      description: |-
-                        Name of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                      type: string
-                    namespace:
-                      description: |-
-                        Namespace of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
-                      type: string
-                    resourceVersion:
-                      description: |-
-                        Specific resourceVersion to which this reference is made, if any.
-                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
-                      type: string
-                    uid:
-                      description: |-
-                        UID of the referent.
-                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
-                      type: string
-                  type: object
-                  x-kubernetes-map-type: atomic
-                type: array
-                x-kubernetes-list-type: atomic
               conditions:
-                description: |-
-                  conditions represent the current state of the Module resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: Conditions store the status conditions of the Module
+                  (e.g., Ready, TemplateNotFound).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -191,16 +147,44 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              helmReleaseRef:
+                description: HelmReleaseRef is a reference to the FluxCD HelmRelease
+                  managed by this Module.
+                properties:
+                  name:
+                    description: Name is the name of the referenced resource.
+                    type: string
+                  namespace:
+                    description: Namespace is the namespace of the referenced resource.
+                    type: string
+                required:
+                - name
+                type: object
+              kustomizationRef:
+                description: KustomizationRef is a reference to the FluxCD Kustomization
+                  managed by this Module.
+                properties:
+                  name:
+                    description: Name is the name of the referenced resource.
+                    type: string
+                  namespace:
+                    description: Namespace is the namespace of the referenced resource.
+                    type: string
+                required:
+                - name
+                type: object
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
-                  by the controller.
+                description: |-
+                  ObservedGeneration is the most recent generation observed by the controller.
+                  It corresponds to the Module's generation, which is updated on mutation by the API Server.
                 format: int64
                 type: integer
-              templateResourceVersion:
+              templateGeneration:
                 description: |-
-                  TemplateResourceVersion captures the templates ConfigMap resourceVersion that was last applied.
-                  This helps with observability/debugging when templates are updated.
-                type: string
+                  TemplateGeneration tracks the observed generation of the referenced ModuleTemplate.
+                  This allows the controller to detect and reconcile template changes.
+                format: int64
+                type: integer
             type: object
         required:
         - spec

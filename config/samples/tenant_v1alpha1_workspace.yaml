@@ -7,7 +7,7 @@ metadata:
   name: workspace-sample
 spec:
   namespace: "this-is-user-namespace"
-  users:
+  members:
     - name: "aaa"
       subject: "aaa"
       role: "admin"
@@ -37,4 +37,4 @@ spec:
         type: Container
   networkIsolation:
     enabled: true
-    allowedNamespaces: ["kube-system", "otterscale-operator-system"]
+    allowedNamespaces: ["kube-system", "otterscale-system"]

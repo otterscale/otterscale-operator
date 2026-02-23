@@ -18,9 +18,13 @@ package tenant
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -29,14 +33,19 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	tenantv1alpha1 "github.com/otterscale/otterscale-operator/api/tenant/v1alpha1"
+	webhooktenantv1alpha1 "github.com/otterscale/otterscale-operator/internal/webhook/tenant/v1alpha1"
 	istioapisecurityv1 "istio.io/client-go/pkg/apis/security/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -69,6 +78,9 @@ var _ = BeforeSuite(func() {
 	err = admissionregistrationv1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = apiextensionsv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = istioapisecurityv1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -78,6 +90,9 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		WebhookInstallOptions: envtest.WebhookInstallOptions{
+			Paths: []string{filepath.Join("..", "..", "..", "config", "webhook")},
+		},
 	}
 
 	// Retrieve the first found binary directory to allow running tests from IDEs
@@ -94,6 +109,43 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	// Start webhook server via controller-runtime Manager so that
+	// validating/mutating admission tests can exercise the full chain.
+	webhookInstallOptions := &testEnv.WebhookInstallOptions
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme: scheme.Scheme,
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Host:    webhookInstallOptions.LocalServingHost,
+			Port:    webhookInstallOptions.LocalServingPort,
+			CertDir: webhookInstallOptions.LocalServingCertDir,
+		}),
+		LeaderElection: false,
+		Metrics:        metricsserver.Options{BindAddress: "0"},
+	})
+	Expect(err).NotTo(HaveOccurred())
+
+	// Use the same SA identity as the hardcoded const in validation tests.
+	err = webhooktenantv1alpha1.SetupWorkspaceWebhookWithManager(mgr,
+		"system:serviceaccount:otterscale-system:otterscale-operator-controller-manager")
+	Expect(err).NotTo(HaveOccurred())
+
+	go func() {
+		defer GinkgoRecover()
+		err = mgr.Start(ctx)
+		Expect(err).NotTo(HaveOccurred())
+	}()
+
+	// Wait for the webhook server to be ready.
+	dialer := &net.Dialer{Timeout: time.Second}
+	addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
+	Eventually(func() error {
+		conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	}).Should(Succeed())
+
 	applyManifests(filepath.Join("..", "..", "..", "config", "admission"))
 	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "tenant_workspace_editor_role.yaml"))
 	applyManifest(filepath.Join("..", "..", "..", "config", "rbac", "tenant_workspace_binding.yaml"))
@@ -102,8 +154,9 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	cancel()
-	err := testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
+	Eventually(func() error {
+		return testEnv.Stop()
+	}, time.Minute, time.Second).Should(Succeed())
 })
 
 // getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
@@ -131,6 +184,10 @@ func getFirstFoundEnvTestBinaryDir() string {
 
 func applyManifests(dir string) {
 	files, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		logf.Log.Info("Manifest directory does not exist, skipping", "path", dir)
+		return
+	}
 	Expect(err).NotTo(HaveOccurred())
 
 	for _, f := range files {
@@ -162,8 +219,6 @@ func applyManifest(path string) {
 			continue
 		}
 
-		if err := k8sClient.Create(ctx, obj); err != nil {
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(k8sClient.Create(ctx, obj)).To(Succeed())
 	}
 }
